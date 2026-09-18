@@ -1,17 +1,21 @@
 <p align="center">
-  <a href="https://pkg.go.dev/github.com/fyne-io/oksvg?tab=doc" title="Go API Reference" rel="nofollow"><img src="https://img.shields.io/badge/go-documentation-blue.svg?style=flat" alt="Go API Reference"></a>
-  <a href="https://img.shields.io/github/v/release/fyne-io/oksvg?include_prereleases" title="Latest Release" rel="nofollow"><img src="https://img.shields.io/github/v/release/fyne-io/oksvg?include_prereleases" alt="Latest Release"></a>
+  <a href="https://pkg.go.dev/github.com/golang-gui/oksvg?tab=doc" title="Go API Reference" rel="nofollow"><img src="https://img.shields.io/badge/go-documentation-blue.svg?style=flat" alt="Go API Reference"></a>
 </p>
 
 # oksvg
 Oksvg is a rasterizer for a partial implementation of the SVG2.0 specification in Go.
+
+This is GOUI's fork of [fyne-io/oksvg](https://github.com/fyne-io/oksvg),
+originally by [srwiley](https://github.com/srwiley/oksvg). Fixes are proposed
+upstream separately from fork-specific module changes. The repeated-arc fix is
+tracked in [fyne-io/oksvg#6](https://github.com/fyne-io/oksvg/pull/6).
 
 Although many SVG elements will not be read by oksvg, it is good enough to faithfully produce thousands, but certainly not all, SVG icons available both for free and commercially. A list of valid and invalid elements is in the doc folder.
 
 The package can be installed by running:
 
 ```
-go get github.com/fyne-io/oksvg@latest
+go get github.com/golang-gui/oksvg@latest
 ```
 
 
