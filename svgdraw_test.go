@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	. "github.com/fyne-io/oksvg"
+	. "github.com/golang-gui/oksvg"
 	. "github.com/srwiley/rasterx"
 	//"github.com/srwiley/go/scanFT"
 )

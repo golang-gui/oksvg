@@ -1,4 +1,4 @@
-module github.com/fyne-io/oksvg
+module github.com/golang-gui/oksvg
 
 go 1.19
 
