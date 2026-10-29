@@ -10,15 +10,28 @@ Document and metadata
 Geometry and transforms
 - circle, ellipse, line, path, polygon, polyline and rect.
 - All SVG path commands: M/m, L/l, H/h, V/v, C/c, S/s, Q/q, T/t, A/a, Z/z.
+- A drawing command after Z starts a new subpath at the closed path's origin.
+- Reversing round joins and collinear quadratic/cubic cusps retain their outlines.
 - Translate, rotate, scale, skewX/skewY and matrix transforms.
 - Strokes are outlined locally before applying the full affine transform.
+- Compact arc flags may be adjacent to each other and following coordinates.
+- Absolute length units px/in/cm/mm/q/pt/pc use 96 CSS pixels per inch.
+- Percentage geometry/stroke lengths use the viewport dimensions; lengths
+  without a horizontal/vertical axis use the normalized viewport diagonal.
+- Circle/ellipse paths start at 3 o'clock and proceed clockwise, including dashes.
+- Missing ellipse radii use the other radius, matching SVG 2 auto defaults.
 
 Resources and style
 - defs, id and local use references (href or xlink:href); forward references work.
 - Simple .class selectors, comma-separated classes, presentation attributes and
   inline style. This is not a full CSS cascade or selector engine.
 - Inline style > class rule > presentation attribute; class rules use source order.
-- color/currentColor, named colors, hex RGB/RGBA, comma-form rgb/rgba and hsl.
+- SVG 2 x/y/width/height/cx/cy/r/rx/ry geometry properties also follow this
+  precedence for supported lengths/percentages; geometry does not inherit.
+- color/currentColor, named colors, hex RGB/RGBA, rgb/rgba and hsl/hsla.
+- Comma-form colors and space/slash forms, HSL hue wrapping and range clamping.
+- Local paint fallback color, currentColor or none after url(...).
+- CSS comments and static a link containers (link activation is not provided).
 - fill, stroke, fill-rule (nonzero/evenodd), fill-opacity, stroke-opacity.
 - stroke-width, stroke-miterlimit, stroke-linecap, stroke-linejoin,
   stroke-dasharray and stroke-dashoffset.
@@ -46,14 +59,18 @@ Not implemented
 - clipPath, masks, patterns, filters, markers, nested SVG viewports and symbols.
 - Text, fonts, external images/resources, scripts and animation.
 - linearRGB interpolation, non-scaling-stroke and full CSS selectors/cascade.
-- Percentage geometry lengths and font-relative units are not resolved;
-  percentage root sizes require a viewBox. Gradient percentages are supported.
+- Font-relative shape lengths are not resolved. Relative intrinsic root sizes
+  (percent/em/ex/rem) require an explicit viewBox; Rasterize supplies the viewport.
+- fr!=0, mix-blend-mode, non-default paint-order, transform-origin and
+  conditional processing are not implemented and are rejected in strict mode.
+- The rasterx stroker has known reversal/round-join limitations; see
+  CorpusValidation.md. These cases are not claimed as rendering passes.
 
 Rasterize and legacy Draw
 - Rasterize returns a fresh transparent premultiplied RGBA image. It uses scanFT
   for evenodd/nonzero support, fits the viewport according to preserveAspectRatio,
   and does not mutate paths, stops, dash arrays or legacy Transform state.
-- SetTarget/Draw remain compatible. SetTarget explicitly stretches the viewBox.
+- SetTarget/Draw remain available. SetTarget explicitly stretches the viewBox.
 - Winding support in legacy Draw depends on the caller's rasterx.Scanner;
   ScannerGV ignores evenodd. Use Rasterize or a winding-capable scanner.
 - Do not concurrently mutate an exported SvgIcon, SvgPath or gradient while it

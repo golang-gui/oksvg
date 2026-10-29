@@ -134,3 +134,46 @@ GOUI 当前 svg.Parse 的前置限制和原有补偿尚未移除，等待用户�
 - librsvg render_document（自 2.46）：https://gnome.pages.gitlab.gnome.org/librsvg/Rsvg-2.0/method.Handle.render_document.html
 
 参考用于确认标准语义与资源边界，不引入 QObject、GDK 或 GOUI 依赖。
+
+## 在线验证集修正（2026-10-29）
+
+输入固定为 Lucide be09619c1c11（1,999 项）、Bootstrap e568465481c0（2,078 项）、
+resvg-test-suite d8e064337faf（1,679 项）。原始 SVG 不做清洗；参考图与诊断副本单独保存。
+
+本轮先修复库内可解释的问题：A/a 按参数位置读取两个单字符 flag；数值与长度解析分开，
+绝对单位采用 96 dpi，几何百分比使用当前视口；HSL 归一化与常见函数颜色语法；
+渐变 pad 保留起点前和终点后的区别。补充低成本兼容：本地 paint fallback、CSS 注释、
+静态链接容器，以及无需文本排版即可确定的 SVG 2 椭圆半径默认值。
+
+描边使用直接 rasterx 调用作控制实验；若不经过 SVG 解析仍复现，则记录底层限制，
+不在 oksvg 添加按图标名称、像素位置或特定路径补偿。滤镜、文本、mask、pattern、
+group opacity 等仍不扩展；已知未实现的绘制属性在 Strict 模式明确拒绝，宽松模式按
+已有策略记录/忽略。外部依赖仓库和 GOUI 本轮不修改。
+
+验证分为解析接受、渲染完成、参考一致、渲染器限制、未实现能力和非法输入；不得将
+后三类计作通过。新增回归用例必须有独立坐标/颜色预期，完整在线集重跑并保留前后对照。
+具体结果、底层限制与跳过项见 [CorpusValidation](CorpusValidation.md)。
+另修正圆/椭圆的等价路径方向，按规范从三点钟位置顺时针构造四段圆弧；
+无 moveto 的非法路径在解析阶段拒绝。
+
+## 自维护渲染器与轮廓验收（2026-10-29）
+
+在前述保留底层缺陷证据的阶段之后，本轮获准修改独立 fork 的 rasterx / scanFT。
+GOUI 仍不修改。各库在 main 开发，master 保留原状；模块迁移、算法修复、上游 PR
+按各 fork 的 AGENTS.md 分离。
+
+- rasterx：通过法向量点积区分同向与反向共线连接，为 Round 折返生成半圆。
+  共线二次、三次曲线在内部方向反转的驻点拆分，保留原命令连接配置，恢复后续状态。
+- scanFT：修复颜色函数在 draw.Src 下交换绿色与蓝色的问题，以标准库 DrawMask 精确验证。
+- oksvg：Z 后的非 M 绘制命令显式建立从原起点开始的新子路径，修复 mop 等输入的轮廓。
+- oksvg：基础形状的 x/y/width/height/cx/cy/r/rx/ry 复用已有局部级联；根尺寸和 use 的
+  x/y 一并适配。解析级联与样式继承分离，不把几何属性存入继承的 PathStyle，不允许 CSS
+  设置 id/href/points 等 XML 结构属性。不引入完整 CSS 布局、calc 或 CSS path 语法。
+
+已完成轮廓与颜色回归、三库全量测试、固定在线素材对照；race 和目标编译结果统一记录于
+[CorpusValidation](CorpusValidation.md)。复杂 CSS 几何表达式、滤镜、离屏组透明度等仍是
+待规划能力，不因“能解析、能生成图片”而宣称正确支持。
+
+main 已将本地开发占位替换为自维护 rasterx / scanFT 实际提交的精确伪版本。
+依赖提交尚未推送时，通过仓库外工作区联调；推送顺序为 rasterx -> scanFT -> oksvg，
+确保远程能够解析依赖。正式标签发布和 GOUI 升级待单独指令。

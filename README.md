@@ -33,7 +33,7 @@ transparent pixels outside the artwork. It applies `viewBox` and
 `preserveAspectRatio` (default: `xMidYMid meet`). Invalid target sizes return
 `nil`. It has no image cache and does not change `SetTarget`/`Transform` state;
 concurrent calls are safe while the parsed icon is not modified by callers.
-It uses the pure Go [scanFT](https://github.com/srwiley/scanFT) scanner for both
+It uses the pure Go [scanFT](https://github.com/golang-gui/scanFT) scanner for both
 nonzero and evenodd filling. No cgo or native SVG library is required.
 
 The existing `SetTarget`/`Draw` interface remains available. `SetTarget`
@@ -55,6 +55,18 @@ Definitions may follow their uses. Inline styles override presentation
 attributes, and inherited fill/stroke opacity is overridden rather than
 multiplied by a child's declaration.
 
+Compact arc flags, percentage geometry and stroke lengths, 96-dpi absolute
+length units, and local paint fallbacks such as `url(#paint) currentColor` are
+supported. Function colors include RGB/HSL alpha and space/slash forms.
+Relative intrinsic `em`/`ex`/`rem` sizes can accompany an explicit viewBox;
+font-relative shape lengths still require an unavailable font context.
+
+SVG 2 geometry properties `x`, `y`, `width`, `height`, `cx`, `cy`, `r`, `rx`
+and `ry` also accept supported lengths/percentages in class rules and inline
+styles, using the same precedence as paint properties. Geometry is local to
+each element and does not implicitly inherit. This does not add full CSS
+layout, `calc()`, or CSS path syntax.
+
 `StrictErrorMode` rejects recognized unsupported rendering features, including
 object/group opacity other than 1, clipping, masks, filters, text and animation.
 Unknown attributes are ignored for forward compatibility. `IgnoreErrorMode`
@@ -64,9 +76,20 @@ missing/cyclic local references fail in every mode and return no partial icon.
 
 See [the feature list](doc/SVG_Element_List.txt) and
 [the parser/rasterization design](doc/DesignSVG.md) for scope and limitations.
+Known renderer limitations and online corpus results are recorded in
+[the corpus validation notes](doc/CorpusValidation.md). Reversing round joins,
+collinear curve cusps, and implicit subpaths following closepath have regression
+coverage; remaining reference differences are recorded separately.
 
 
-Oksvg uses the [rasterx](https://github.com/srwiley/rasterx) rasterizer package which implements full SVG2.0 path functions, including the newer 'arc' join-mode.
+Oksvg uses the maintained [rasterx](https://github.com/golang-gui/rasterx) fork for
+path stroking, including the extended 'arc' join mode.
+
+The current development branches use the `golang-gui` module paths throughout.
+Dependencies are pinned to exact fork commits. Those commits must be available
+on their remotes before standalone module resolution; local integration before
+pushing uses a temporary Go workspace. See the validation notes for the staging
+and release order. Legacy `Draw` users must use the matching fork's rasterx types.
 
 ![arcs and caps](doc/TestShapes.png)
 
