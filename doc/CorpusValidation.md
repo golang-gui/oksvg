@@ -13,7 +13,7 @@
 | [Bootstrap Icons](https://github.com/twbs/icons) | e568465481c0c541f63a78f6452d09387711d489 | 2,078 | MIT |
 | [resvg-test-suite](https://github.com/linebender/resvg-test-suite) | d8e064337faf01bc5a9579187a56dbdbe3eacc72 | 1,679 | MIT |
 
-全量素材、工具、位图与逐项结果放在仓库外。用于包内回归的十七个原始 SVG 位于
+全量素材、工具、位图与逐项结果放在仓库外。用于包内回归的原始 SVG 位于
 `testdata/corpus/`，附原许可证及 SOURCE.txt；测试不访问网络。
 
 ## 已修正
@@ -144,14 +144,14 @@ Strict 模式拒绝文本、字体、外部图片、filter、mask、clipPath、p
 
 - defs / linearGradient 的 display:none：Chrome 与规范及套件 PNG 有差异；没有为了
   匹配 Chrome 的空白结果而禁止引用资源。
-- 外圆之外的径向焦点：SVG 1.1 要求移动焦点到边界，SVG 2 允许外部焦点。本库仍沿用
-  SVG 1.1 的此项语义；不把版本差异作为本轮已确认算法缺陷，也不声称支持完整 SVG 2。
+- 外圆之外的径向焦点：SVG 1.1 要求移动焦点到边界，SVG 2 允许外部焦点。第三阶段仍沿用
+  SVG 1.1；第四阶段已改为 SVG 2 的零半径焦点圆族求解，仍不声称支持完整 SVG 2。
 - 圆角、图像最外行/列仍有抗锯齿与 fixed-point 精度差异。例如 Bootstrap heptagon-fill
   的边界覆盖率差异仍保留记录，不与明显的几何缺失混为一谈。
 - 零间隔虚线 n-0：此前将角部差异笼统归于参考差异并不准确。复核原始 500px 套件 PNG，
   其分离端帽与 Chrome 一致；旧 librsvg 的结果不同。该项已确认为 Dasher 顶点处理缺陷并修复。
 - 前阶段保留的虚线相位、零长度 dash 和 miter-clip 已在第三阶段复核并修正。
-  非共线近退化曲线等剩余差异仍保留为待验收项，不自动宣称已修复或归入 renderer skip。
+  近直线曲线 line-as-curve-2 已在第四阶段修复；其他非共线退化情形不自动宣称全部通过。
 
 像素比较采用预乘 sRGB。稳定内部与边界分开：参考 5×5 邻域变化 ≤4/255 的区域检测
 超过 4/255 的差异；墨迹检测要求一图 alpha>32，另一图 3×3 邻域 alpha 全部 ≤2。
@@ -187,7 +187,8 @@ Strict 模式拒绝文本、字体、外部图片、filter、mask、clipPath、p
 - [x] 将模块迁移、各项修复分别提交，并固定 fork 依赖提交版本。
 - [ ] 从 master 创建对应上游 PR 分支，保留上游路径重新验证。
 - [ ] 按 rasterx -> scanFT -> oksvg 的顺序推送提交；正式标签另行发布。
-- [ ] 后续逐项归因虚线、miter-clip 和非共线退化曲线差异；复杂 CSS 几何表达式等能力另行设计。
+- [x] 第三/四阶段复核虚线、miter-clip 和 line-as-curve-2，分别修复或确认参考不适用。
+- [ ] 其他非共线退化曲线、复杂 CSS 几何表达式等能力另行设计。
 - [ ] GOUI 接入，等待用户单独指令。
 
 ## 第三阶段：边缘覆盖率与虚线精度
@@ -270,6 +271,69 @@ MAE 为预乘 RGBA 四通道平均绝对差，数值范围 0～255；不将其�
 临时产物：`/tmp/svg-edges-bmcfhzre/logs/full-comparison.jsonl`、`full-summary.json`、
 `golden-comparison.json`、`chrome-miter-clip-support.json` 与 `results/before-after.png`。
 `dash_fuzz_test.go` 使用 go1.18 构建约束，以保持生产库 Go 1.17 元数据要求。
+
+## 第四阶段：大面积语义差异与近直线端部
+
+基线：oksvg `938f58d`、rasterx `b9cbd80`、scanFT `ff7a33a`。
+环境仍为 Linux amd64、Go 1.25.8、纯 Go CPU 绘制；GOUI 未修改。
+
+此前“剩余边缘微差”的概括仅适用于图标边缘，不能覆盖下述 resvg 语义和端部用例。
+本阶段不降低筛选阈值，也不以 Chrome 为所有属性的唯一正确参考。
+
+### 修正
+
+- SVG 径向渐变不再钳制外部焦点，以圆族方程取最大的非负根；圆锥外没有有效根的区域透明。
+  焦点在终圆上时单独求一次方程，圆内根使用稳定公式，避免相减损失精度。
+  半透明 stop、repeat/reflect、objectBoundingBox 和仿射变换继续复用既有语义。
+  此项修改在 oksvg 的 SVG 采样中；rasterx 的旧 Gradient.GetColorFunction 接口没有迁移。
+- rasterx 在控制点到端点弦的距离不超过 1/4 光栅单位、且投影单调时简化近直线曲线，
+  端帽和连接与有限段保持一致。排除折返、闭环、明显曲率和放大后超限的控制组；
+  不扩大到任意曲线，也不修改输入路径或 Filler 的几何。
+- 新断言在基线副本上失败，保留失败日志；当前独立圆族颜色、有限直线端帽/虚线轮廓断言通过。
+  原始 SVG 加入 testdata，保留上游固定版本和许可证。
+
+### 目标用例
+
+| 用例 | 128px stable_bad / geometry_bad，前→后 | 500px 套件对照 |
+| --- | --- | --- |
+| focal-point-correction | 13,108 / 4,122 → 0 / 0 | 两项均 0，MAE 0.0169 |
+| line-as-curve-2 | 6 / 20 → 0 / 0 | 两项均 0，MAE 0.0261 |
+
+两项在 24、64px 对照中同样为 0 / 0。数值仍采用此前相同的预乘 sRGB 筛选公式。
+
+### 参考不适用的四项
+
+| 用例 | 正确预期与依据 | 当前结果 |
+| --- | --- | --- |
+| display/none-on-defs | display:none 不阻止资源被引用；规范和套件均为渐变 | 与 500px 套件对照两项均 0 |
+| display/none-on-linearGradient | 渐变定义仍可被引用；规范和套件均为渐变 | 与 500px 套件对照两项均 0 |
+| display/none-on-svg | 根及其子树不绘制；套件为透明 | 与套件逐像素一致 |
+| stroke-linejoin/miter-clip | 本机 Chrome 不支持，回退为 miter | 数学回归通过，与 500px 套件两项均 0 |
+
+Chrome 500px 重新运行后仍显示上述差异，CSS.supports 仍返回 false。
+原始参考图和差异数保留，不删除样本、不改为“与 Chrome 一致”。
+对照图把这些项目明确标为参考不适用，并另外提供套件预期与当前输出的比较。
+
+### 全量回归与检查
+
+- 5,756 份原始 SVG：4,464 份 × 三个尺寸，共 13,392 张；1,292 份 Strict 拒绝，数量不变。
+- 额外合成/样式回归 36 张，两项筛选均为零；合计 13,428 张对照。
+- Lucide 三个尺寸仍无筛选候选；Bootstrap 24px 无候选，64px 38 项、128px 21 项，与基线一致。
+- 没有新增候选、panic、非法预乘像素或源素材 SHA-256 变化。
+- resvg 128px 候选从 6 项降为 4 项，剩余均为上述参考不适用项。24px 的 arcs、miter
+  仍各有 1 个轮廓差异像素，继续保留为小尺寸尖角差异，不计为已消除。
+- 三库全量 `go test ./... -count=1`、`go test -race ./... -count=1` 通过。
+- Dasher fuzz 15 秒 127,907 次；parser fuzz 15 秒 423,681 次，无失败。
+- 三库 CGO_ENABLED=0 编译 Windows amd64、Linux arm64、macOS arm64，共九项通过。
+  跨目标仅编译，未在这些目标运行，不依赖桌面或窗口系统。
+
+产物位于仓库外 `/tmp/svg-semantics-bca5nn9d/`，包括基线失败回归、全量逐项对照、
+selected-comparison.json、race/fuzz 日志、目标编译结果及源代码快照。
+依赖使用外部 go.work 联调；本阶段修复与依赖更新已分别提交，依赖固定到实际提交的精确版本。
+尚未推送或发布标签，GOUI 未修改。
+
+仍未覆盖：非零 fr、焦点恰在终圆上时 repeat/reflect 退化区域的平均色等完整边界语义；
+它们不能因本阶段外部焦点修正而自动宣称支持。普通图标的 26.6 精度及边缘差异也仍保留。
 
 ## 规范依据
 

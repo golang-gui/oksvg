@@ -34,33 +34,20 @@ func pathPaint(paint any, opacity float64, m rasterx.Matrix2D, b pathBounds) any
 		}
 		inverse := mapping.Invert()
 		stops := v.Stops
+		cx, cy, fx, fy, radius := v.Points[0], v.Points[1], v.Points[2], v.Points[3], v.Points[4]
+		dx, dy := cx-fx, cy-fy
+		radialA := dx*dx + dy*dy - radius*radius
 		return rasterx.ColorFunc(func(x, y int) color.Color {
 			px, py := inverse.Transform(float64(x)+.5, float64(y)+.5)
 			t := 0.0
 			if v.IsRadial {
-				cx, cy, fx, fy, r := v.Points[0], v.Points[1], v.Points[2], v.Points[3], v.Points[4]
-				if r <= 0 {
+				if radius <= 0 {
 					return multiplyOpacity(stops[len(stops)-1].StopColor, stops[len(stops)-1].Opacity*opacity)
 				}
-				dx, dy := fx-cx, fy-cy
-				dist := math.Hypot(dx, dy)
-				if dist >= r {
-					scale := r * (1 - 1e-9) / dist
-					fx, fy = cx+dx*scale, cy+dy*scale
-				}
-				dx, dy = px-fx, py-fy
-				if dx != 0 || dy != 0 {
-					ox, oy := fx-cx, fy-cy
-					a := dx*dx + dy*dy
-					bb := ox*dx + oy*dy
-					c := ox*ox + oy*oy - r*r
-					disc := bb*bb - a*c
-					if disc > 0 {
-						u := (-bb + math.Sqrt(disc)) / a
-						if u > 0 {
-							t = 1 / u
-						}
-					}
+				var covered bool
+				t, covered = radialOffset(px-fx, py-fy, dx, dy, radialA)
+				if !covered {
+					return color.RGBA{}
 				}
 			} else {
 				dx, dy := v.Points[2]-v.Points[0], v.Points[3]-v.Points[1]
@@ -106,6 +93,35 @@ func pathPaint(paint any, opacity float64, m rasterx.Matrix2D, b pathBounds) any
 		})
 	}
 	return color.RGBA{}
+}
+
+// radialOffset solves |Q-tD|² = (tr)² for the largest nonnegative t. SVG 2
+// permits an external focus: points outside its cone have no valid circle and
+// remain transparent. Interior roots use a stable form to avoid cancellation.
+func radialOffset(qx, qy, dx, dy, a float64) (float64, bool) {
+	b := qx*dx + qy*dy
+	c := qx*qx + qy*qy
+	if a == 0 {
+		if b <= 0 {
+			return 0, false
+		}
+		return c / (2 * b), true
+	}
+	if c == 0 {
+		return 0, true
+	}
+	discriminant := math.FMA(-a, c, b*b)
+	if discriminant < 0 || a > 0 && b <= 0 {
+		return 0, false
+	}
+	root := math.Sqrt(discriminant)
+	if a > 0 {
+		return (b + root) / a, true
+	}
+	if b >= 0 {
+		return c / (b + root), true
+	}
+	return (b - root) / a, true
 }
 
 func multiplyOpacity(c color.Color, opacity float64) color.RGBA {

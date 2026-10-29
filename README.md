@@ -88,6 +88,12 @@ negative canvas coordinates is clipped before painting. Validation separates
 geometry and color errors from small antialiasing differences, and uses analytic
 expectations or suite references when a browser lacks a feature such as miter-clip.
 
+Radial gradients with a zero-radius focus support the SVG 2 external-focus
+geometry, leaving regions outside the gradient cone transparent. Near-linear
+stroke curves are reduced within a bounded raster-space tolerance to keep their
+caps consistent with the emitted segment. See the [radial-gradient scope](doc/DesignRadialGradient.md)
+for remaining boundary cases and the validation notes for reference exceptions.
+
 
 Oksvg uses the maintained [rasterx](https://github.com/golang-gui/rasterx) fork for
 path stroking, including the extended 'arc' join mode.

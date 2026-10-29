@@ -545,6 +545,14 @@ func TestOnlineCorpusFixtures(t *testing.T) {
 		{"resvg/structure/style-attribute/non-presentational-attribute.svg", 64, 64, color.RGBA{R: 255, A: 255}},
 		{"resvg/painting/stroke-dasharray/on-a-circle.svg", 57, 27, color.RGBA{G: 128, A: 255}},
 		{"resvg/painting/stroke-dasharray/n-0.svg", 22, 22, color.RGBA{}},
+		{"resvg/paint-servers/radialGradient/focal-point-correction.svg", 64, 64, color.RGBA{A: 255}},
+		{"resvg/paint-servers/radialGradient/focal-point-correction.svg", 120, 120, color.RGBA{}},
+		{"resvg/painting/display/none-on-defs.svg", 64, 64, color.RGBA{R: 126, G: 191, B: 126, A: 255}},
+		{"resvg/painting/display/none-on-linearGradient.svg", 64, 64, color.RGBA{R: 126, G: 191, B: 126, A: 255}},
+		{"resvg/painting/display/none-on-svg.svg", 64, 64, color.RGBA{}},
+		{"resvg/painting/stroke/line-as-curve-2.svg", 102, 7, color.RGBA{}},
+		{"resvg/painting/stroke/line-as-curve-2.svg", 101, 13, color.RGBA{G: 128, A: 255}},
+		{"resvg/painting/stroke-linejoin/miter-clip.svg", 16, 81, color.RGBA{A: 255}},
 	} {
 		t.Run(tt.file, func(t *testing.T) {
 			icon, err := ReadIcon("testdata/corpus/"+tt.file, StrictErrorMode)
