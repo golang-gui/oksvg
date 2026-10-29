@@ -6,8 +6,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/srwiley/rasterx"
-	"github.com/srwiley/scanFT"
+	"github.com/golang-gui/rasterx"
+	"github.com/golang-gui/scanFT"
 )
 
 type aspectRatio struct {

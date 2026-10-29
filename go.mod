@@ -3,8 +3,8 @@ module github.com/golang-gui/oksvg
 go 1.19
 
 require (
-	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
-	github.com/srwiley/scanFT v0.0.0-20220128184157-0d1ee492111f
+	github.com/golang-gui/rasterx v0.0.0-20261029051821-786a0e19619b
+	github.com/golang-gui/scanFT v0.0.0-20261029051852-22c6bb2e88b9
 	golang.org/x/image v0.24.0
 	golang.org/x/net v0.35.0
 )

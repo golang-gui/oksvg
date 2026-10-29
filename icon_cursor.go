@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/srwiley/rasterx"
+	"github.com/golang-gui/rasterx"
 )
 
 // IconCursor is used while parsing SVG files.

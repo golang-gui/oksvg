@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/srwiley/rasterx"
+	"github.com/golang-gui/rasterx"
 	"golang.org/x/net/html/charset"
 )
 

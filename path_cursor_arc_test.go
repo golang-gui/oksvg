@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/srwiley/rasterx"
+	"github.com/golang-gui/rasterx"
 )
 
 // Each seven-parameter group following A/a is a separate arc. In particular,

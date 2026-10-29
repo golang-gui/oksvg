@@ -3,7 +3,7 @@ package oksvg
 import (
 	"math"
 
-	"github.com/srwiley/rasterx"
+	"github.com/golang-gui/rasterx"
 	"golang.org/x/image/math/fixed"
 )
 

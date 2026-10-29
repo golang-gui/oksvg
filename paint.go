@@ -5,7 +5,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/srwiley/rasterx"
+	"github.com/golang-gui/rasterx"
 )
 
 // Paint sampling is in gradient space, independently of the device-space

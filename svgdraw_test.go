@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	. "github.com/golang-gui/oksvg"
-	. "github.com/srwiley/rasterx"
+	. "github.com/golang-gui/rasterx"
 	//"github.com/srwiley/go/scanFT"
 )
 

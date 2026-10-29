@@ -8,7 +8,7 @@ package oksvg
 import (
 	"image/color"
 
-	"github.com/srwiley/rasterx"
+	"github.com/golang-gui/rasterx"
 )
 
 // PathStyle holds the state of the SVG style.
