@@ -81,6 +81,13 @@ Known renderer limitations and online corpus results are recorded in
 collinear curve cusps, and implicit subpaths following closepath have regression
 coverage; remaining reference differences are recorded separately.
 
+Path and transform coordinates round consistently to the nearest fixed-point
+unit. Dashed strokes retain fractional segment distances and handle zero-length
+dash/gap boundaries; repeated curve samples preserve stroke normals. Coverage at
+negative canvas coordinates is clipped before painting. Validation separates
+geometry and color errors from small antialiasing differences, and uses analytic
+expectations or suite references when a browser lacks a feature such as miter-clip.
+
 
 Oksvg uses the maintained [rasterx](https://github.com/golang-gui/rasterx) fork for
 path stroking, including the extended 'arc' join mode.

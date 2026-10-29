@@ -13,7 +13,7 @@
 | [Bootstrap Icons](https://github.com/twbs/icons) | e568465481c0c541f63a78f6452d09387711d489 | 2,078 | MIT |
 | [resvg-test-suite](https://github.com/linebender/resvg-test-suite) | d8e064337faf01bc5a9579187a56dbdbe3eacc72 | 1,679 | MIT |
 
-全量素材、工具、位图与逐项结果放在仓库外。用于包内回归的十三个原始 SVG 位于
+全量素材、工具、位图与逐项结果放在仓库外。用于包内回归的十七个原始 SVG 位于
 `testdata/corpus/`，附原许可证及 SOURCE.txt；测试不访问网络。
 
 ## 已修正
@@ -148,9 +148,10 @@ Strict 模式拒绝文本、字体、外部图片、filter、mask、clipPath、p
   SVG 1.1 的此项语义；不把版本差异作为本轮已确认算法缺陷，也不声称支持完整 SVG 2。
 - 圆角、图像最外行/列仍有抗锯齿与 fixed-point 精度差异。例如 Bootstrap heptagon-fill
   的边界覆盖率差异仍保留记录，不与明显的几何缺失混为一谈。
-- 零间隔虚线 n-0：Chrome 的角部与 librsvg / 套件参考不同，不能单凭 Chrome 比较判为本库错误。
-- 虚线方向修正后，部分虚线相位、零长虚线、非共线退化曲线及 miter-clip 仍有差异；
-  目前未全部归因，保留为待验收项，不自动宣称已修复或归入 renderer skip。
+- 零间隔虚线 n-0：此前将角部差异笼统归于参考差异并不准确。复核原始 500px 套件 PNG，
+  其分离端帽与 Chrome 一致；旧 librsvg 的结果不同。该项已确认为 Dasher 顶点处理缺陷并修复。
+- 前阶段保留的虚线相位、零长度 dash 和 miter-clip 已在第三阶段复核并修正。
+  非共线近退化曲线等剩余差异仍保留为待验收项，不自动宣称已修复或归入 renderer skip。
 
 像素比较采用预乘 sRGB。稳定内部与边界分开：参考 5×5 邻域变化 ≤4/255 的区域检测
 超过 4/255 的差异；墨迹检测要求一图 alpha>32，另一图 3×3 邻域 alpha 全部 ≤2。
@@ -188,6 +189,87 @@ Strict 模式拒绝文本、字体、外部图片、filter、mask、clipPath、p
 - [ ] 按 rasterx -> scanFT -> oksvg 的顺序推送提交；正式标签另行发布。
 - [ ] 后续逐项归因虚线、miter-clip 和非共线退化曲线差异；复杂 CSS 几何表达式等能力另行设计。
 - [ ] GOUI 接入，等待用户单独指令。
+
+## 第三阶段：边缘覆盖率与虚线精度
+
+基线：oksvg ca33d96、rasterx 786a0e1、scanFT 22c6bb2。环境同上，GOUI 未修改。
+在线输入与参考缓存保持原样，新增 Bootstrap 包内素材附原 MIT 许可及固定提交信息。
+
+### 修正与最小回归
+
+1. 浮点转定点统一最近取整。`M2 2` 后累加 140 次 `v0.1` 应到达 y=16；旧输出在
+   128px 目标底部 alpha=224，修复后为 255。坐标与变换、贝塞尔离散点也采用一致规则。
+2. 重复采样不携带方向，不能把描边法向量清零。native 的圆端帽内部曾为 alpha=243；
+   修复后不透明。Lucide parentheses、rocket、scan-face、sticker、variable 的剩余候选因此消除。
+3. Dasher 内部累计完整欧氏距离，修复每个小段截断造成的相位漂移；独立用一段和
+   448 个共线小段验证解析相位，包含负 offset 和大 offset。
+4. dash 在顶点结束时结束该 dash，即使下一 gap 为零也不跨 dash 生成 miter；新 dash
+   起始端帽等待出方向切线。独立 L 形区间覆盖 round/square/butt 与普通 gap、零 gap、点状 dash。
+5. scanFT 使用 floor 分解负坐标。四分之一像素交集原输出 alpha=128，应约 64；
+   双负坐标的 1/16 像素面积原输出 alpha=64，应约 16。反向绕向、完全在外及包围画布的矩形均验证。
+6. miter-clip 以浮点计算裁切平面和两侧交点，最终顶点再量化，并保留自定义 JoinGap。
+   3-4-5 法向量的解析交点及真实 gap 中心回归通过。
+
+独立像素采样、颜色空间、预乘规则与筛选阈值均未放宽。覆盖率矩形的 1/255 量化容差
+来自既有 12 位覆盖率到 8 位 alpha 的转换，不是为了接受旧错误。
+
+### 对照结果
+
+全量仍为 5,756 份原始 SVG；4,464 份完成三个尺寸渲染，1,292 份按既有 Strict 规则拒绝。
+13,392 张原始素材输出加 36 张此前合成/样式回归，共对照 13,428 张图片，未出现 panic、
+非法预乘像素或输入 SHA-256 改变。
+
+| Chrome 筛选项 | 上阶段 | 本阶段 |
+| --- | ---: | ---: |
+| Lucide 128px stable_bad | 13 | 0 |
+| Lucide 128px 候选数 | 5 | 0 |
+| Bootstrap 24px stable_bad | 7 | 0 |
+| Bootstrap 64px stable_bad | 253 | 149 |
+| Bootstrap 128px stable_bad | 376 | 112 |
+| Bootstrap 128px 候选数 | 36 | 21 |
+| resvg 128px 候选数 | 18 | 6 |
+
+Lucide 在 24/64/128px 均为 stable_bad=0、geometry_bad=0；Bootstrap 三个尺寸的
+geometry_bad 均为 0。额外 36 张合成/样式回归两项指标均为 0。
+原先 12 项虚线用例在 128px 的稳定区域及轮廓筛选全部通过。
+
+另以 resvg 原始 500px PNG 复核，指标使用同一公式：
+
+| 用例 | geometry_bad 修正前→后 | stable_bad 修正前→后 | MAE 修正前→后 |
+| --- | --- | --- | --- |
+| stroke-dasharray/n-0 | 2,304→0 | 2,116→0 | 0.992550→0.009048 |
+| stroke-dasharray/on-a-circle | 714→0 | 276→0 | 0.605903→0.077167 |
+| stroke-linejoin/miter-clip | 0→0 | 0→0 | 0.040841→0.021285 |
+
+MAE 为预乘 RGBA 四通道平均绝对差，数值范围 0～255；不将其替代轮廓与颜色断言。
+
+### 仍存在的差异
+
+- 本机 Chrome 156.0.8078.47 的 `CSS.supports('stroke-linejoin','miter-clip')` 为 false，
+  路径的计算样式为 miter；它仍被原始筛选列为差异，但该参考不适用于 miter-clip。
+  本项使用上述数学回归与套件 PNG，不删除用例、不放宽阈值。
+- resvg 其余候选为径向焦点的 SVG 版本差异、display 的参考差异及 line-as-curve-2 的近退化曲线；
+  本轮未将它们自动视为修复完成。
+- Bootstrap 仍有 21 个 128px 边缘候选，其中 5 个此前未标记：globe-americas-fill、
+  hand-thumbs-down、mouse3、person-wheelchair、tornado。新增点全部位于第 0 或 127 行，
+  alpha 与参考差 5～11，没有超出既定一像素邻域的轮廓差异。原 Instagram 的边缘覆盖率差异
+  在最近取整后有所增大，也保留记录。
+- 原因是 Path 仍使用 1/64 SVG 单位的固有精度；在画布边缘放大后可产生小于一像素的覆盖率差异。
+  本轮不引入新路径类型、重复缓存或按图标特殊吸附；高精度路径属于后续独立设计。
+
+### 检查与交付状态
+
+- [x] 三库 `go test ./... -count=1`、`go test -race ./... -count=1`。
+- [x] Dasher fuzz 15 秒，132,349 次；解析 fuzz 15 秒，564,963 次；无失败。
+- [x] 三库 `CGO_ENABLED=0 go test -c`，Windows amd64 / Linux arm64 / macOS arm64，共九项通过。
+- [x] 原始输入、独立几何/合成回归、跨库对照及代码快照校验。
+- [x] 本轮修复、依赖版本与验证文档分别提交，fork 依赖固定到实际提交的精确版本。
+- [ ] 从 master 准备上游 PR 分支；推送、标签和 GOUI 升级另按用户指令执行。
+
+全部执行于 Linux amd64、Go 1.25.8 的仓库外源码副本；跨目标仅编译，不代表原生运行验收。
+临时产物：`/tmp/svg-edges-bmcfhzre/logs/full-comparison.jsonl`、`full-summary.json`、
+`golden-comparison.json`、`chrome-miter-clip-support.json` 与 `results/before-after.png`。
+`dash_fuzz_test.go` 使用 go1.18 构建约束，以保持生产库 Go 1.17 元数据要求。
 
 ## 规范依据
 
