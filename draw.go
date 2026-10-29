@@ -9,7 +9,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"log"
+	"image/color"
+	"math"
 	"strings"
 
 	"github.com/srwiley/rasterx"
@@ -18,14 +19,8 @@ import (
 
 func draw(name string, c *IconCursor, attrs []xml.Attr) error {
 	switch name {
-	case "svg":
-		return drawSvg(c, attrs)
-	case "g":
-		return drawG(c, attrs)
 	case "line":
 		return drawLine(c, attrs)
-	case "stop":
-		return drawStop(c, attrs)
 	case "rect":
 		return drawRect(c, attrs)
 	case "circle":
@@ -38,20 +33,6 @@ func draw(name string, c *IconCursor, attrs []xml.Attr) error {
 		return drawPolygon(c, attrs)
 	case "path":
 		return drawPath(c, attrs)
-	case "desc":
-		return drawDesc(c, attrs)
-	case "defs":
-		return drawDefs(c, attrs)
-	case "style":
-		return drawStyle(c, attrs)
-	case "title":
-		return drawTitle(c, attrs)
-	case "linearGradient":
-		return drawLinearGradient(c, attrs)
-	case "radialGradient":
-		return drawRadialGradient(c, attrs)
-	case "use":
-		return drawUse(c, attrs)
 	default:
 		return fmt.Errorf("cannot process svg element %s", name)
 	}
@@ -63,10 +44,12 @@ func drawSvg(c *IconCursor, attrs []xml.Attr) error {
 	c.icon.ViewBox.W = 0
 	c.icon.ViewBox.H = 0
 	var width, height float64
+	var hasViewBox bool
 	var err error
 	for _, attr := range attrs {
 		switch attr.Name.Local {
 		case "viewBox":
+			hasViewBox = true
 			err = c.GetPoints(attr.Value)
 			if len(c.points) != 4 {
 				return errParamMismatch
@@ -76,25 +59,31 @@ func drawSvg(c *IconCursor, attrs []xml.Attr) error {
 			c.icon.ViewBox.W = c.points[2]
 			c.icon.ViewBox.H = c.points[3]
 		case "width":
-			width, err = parseFloat(attr.Value, 64)
+			if strings.HasSuffix(strings.TrimSpace(attr.Value), "%") {
+				_, err = readFraction(attr.Value)
+			} else {
+				width, err = parseFloat(attr.Value, 64)
+			}
 		case "height":
-			height, err = parseFloat(attr.Value, 64)
+			if strings.HasSuffix(strings.TrimSpace(attr.Value), "%") {
+				_, err = readFraction(attr.Value)
+			} else {
+				height, err = parseFloat(attr.Value, 64)
+			}
 		}
 		if err != nil {
 			return err
 		}
 	}
-	if c.icon.ViewBox.W == 0 {
+	if !hasViewBox {
 		c.icon.ViewBox.W = width
-	}
-	if c.icon.ViewBox.H == 0 {
 		c.icon.ViewBox.H = height
 	}
 	return nil
 }
-func drawG(*IconCursor, []xml.Attr) error { return nil } // g does nothing but push the style
 func drawRect(c *IconCursor, attrs []xml.Attr) error {
 	var x, y, w, h, rx, ry float64
+	var hasRX, hasRY bool
 	var err error
 	for _, attr := range attrs {
 		switch attr.Name.Local {
@@ -107,17 +96,30 @@ func drawRect(c *IconCursor, attrs []xml.Attr) error {
 		case "height":
 			h, err = parseFloat(attr.Value, 64)
 		case "rx":
+			hasRX = true
 			rx, err = parseFloat(attr.Value, 64)
 		case "ry":
+			hasRY = true
 			ry, err = parseFloat(attr.Value, 64)
 		}
 		if err != nil {
 			return err
 		}
 	}
+	if w < 0 || h < 0 || rx < 0 || ry < 0 {
+		return fmt.Errorf("negative rectangle extent")
+	}
 	if w == 0 || h == 0 {
 		return nil
 	}
+	if !hasRX {
+		rx = ry
+	}
+	if !hasRY {
+		ry = rx
+	}
+	rx = math.Min(rx, w/2)
+	ry = math.Min(ry, h/2)
 	rasterx.AddRoundRect(x, y, w+x, h+y, rx, ry, 0, rasterx.RoundGap, &c.Path)
 	return nil
 }
@@ -142,6 +144,9 @@ func drawCircle(c *IconCursor, attrs []xml.Attr) error {
 		if err != nil {
 			return err
 		}
+	}
+	if rx < 0 || ry < 0 {
+		return fmt.Errorf("negative ellipse radius")
 	}
 	if rx == 0 || ry == 0 { // not drawn, but not an error
 		return nil
@@ -180,6 +185,7 @@ func drawLine(c *IconCursor, attrs []xml.Attr) error {
 }
 
 func drawPolyline(c *IconCursor, attrs []xml.Attr) error {
+	c.points = c.points[:0]
 	var err error
 	for _, attr := range attrs {
 		switch attr.Name.Local {
@@ -193,7 +199,7 @@ func drawPolyline(c *IconCursor, attrs []xml.Attr) error {
 			return err
 		}
 	}
-	if len(c.points) > 4 {
+	if len(c.points) >= 4 {
 		c.Path.Start(fixed.Point26_6{
 			X: fixed.Int26_6((c.points[0]) * 64),
 			Y: fixed.Int26_6((c.points[1]) * 64),
@@ -210,7 +216,7 @@ func drawPolyline(c *IconCursor, attrs []xml.Attr) error {
 
 func drawPolygon(c *IconCursor, attrs []xml.Attr) error {
 	err := drawPolyline(c, attrs)
-	if len(c.points) > 4 {
+	if len(c.points) >= 4 {
 		c.Path.Stop(true)
 	}
 	return err
@@ -230,193 +236,29 @@ func drawPath(c *IconCursor, attrs []xml.Attr) error {
 	return nil
 }
 
-func drawDesc(c *IconCursor, _ []xml.Attr) error {
-	c.inDescText = true
-	c.icon.Descriptions = append(c.icon.Descriptions, "")
-	return nil
-}
-
-func drawTitle(c *IconCursor, _ []xml.Attr) error {
-	c.inTitleText = true
-	c.icon.Titles = append(c.icon.Titles, "")
-	return nil
-}
-
-func drawDefs(c *IconCursor, _ []xml.Attr) error {
-	c.inDefs = true
-	return nil
-}
-
-func drawStyle(c *IconCursor, _ []xml.Attr) error {
-	c.inDefsStyle = true
-	return nil
-}
-
-func drawLinearGradient(c *IconCursor, attrs []xml.Attr) error {
-	var err error
-	c.inGrad = true
-	c.grad = &rasterx.Gradient{
-		Points:   [5]float64{0, 0, 1, 0, 0},
-		IsRadial: false, Bounds: c.icon.ViewBox, Matrix: rasterx.Identity,
-	}
-	for _, attr := range attrs {
-		switch attr.Name.Local {
-		case "id":
-			id := attr.Value
-			if len(id) >= 0 {
-				c.icon.Grads[id] = c.grad
-			} else {
-				return errZeroLengthID
-			}
-		case "x1":
-			c.grad.Points[0], err = readFraction(attr.Value)
-		case "y1":
-			c.grad.Points[1], err = readFraction(attr.Value)
-		case "x2":
-			c.grad.Points[2], err = readFraction(attr.Value)
-		case "y2":
-			c.grad.Points[3], err = readFraction(attr.Value)
-		default:
-			err = c.ReadGradAttr(attr)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func drawRadialGradient(c *IconCursor, attrs []xml.Attr) error {
-	c.inGrad = true
-	c.grad = &rasterx.Gradient{
-		Points:   [5]float64{0.5, 0.5, 0.5, 0.5, 0.5},
-		IsRadial: true, Bounds: c.icon.ViewBox, Matrix: rasterx.Identity,
-	}
-	var setFx, setFy bool
-	var err error
-	for _, attr := range attrs {
-		switch attr.Name.Local {
-		case "id":
-			id := attr.Value
-			if len(id) >= 0 {
-				c.icon.Grads[id] = c.grad
-			} else {
-				return errZeroLengthID
-			}
-		case "r":
-			c.grad.Points[4], err = readFraction(attr.Value)
-		case "cx":
-			c.grad.Points[0], err = readFraction(attr.Value)
-		case "cy":
-			c.grad.Points[1], err = readFraction(attr.Value)
-		case "fx":
-			setFx = true
-			c.grad.Points[2], err = readFraction(attr.Value)
-		case "fy":
-			setFy = true
-			c.grad.Points[3], err = readFraction(attr.Value)
-		default:
-			err = c.ReadGradAttr(attr)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	if !setFx { // set fx to cx by default
-		c.grad.Points[2] = c.grad.Points[0]
-	}
-	if !setFy { // set fy to cy by default
-		c.grad.Points[3] = c.grad.Points[1]
-	}
-	return nil
-}
-
 func drawStop(c *IconCursor, attrs []xml.Attr) error {
-	var err error
-	if c.inGrad {
-		stop := rasterx.GradStop{Opacity: 1.0}
-		for _, attr := range attrs {
-			switch attr.Name.Local {
-			case "offset":
-				stop.Offset, err = readFraction(attr.Value)
-			case "stop-color":
-				// todo: add current color inherit
-				stop.StopColor, err = ParseSVGColor(attr.Value)
-			case "stop-opacity":
-				stop.Opacity, err = parseFloat(attr.Value, 64)
-			}
+	if c.grad == nil {
+		return fmt.Errorf("stop outside gradient")
+	}
+	s := c.StyleStack[len(c.StyleStack)-1]
+	clr := s.stopColor
+	if _, ok := clr.(currentColorPaint); ok {
+		clr = s.color
+	}
+	col, ok := clr.(color.Color)
+	if !ok {
+		return fmt.Errorf("invalid stop color")
+	}
+	stop := rasterx.GradStop{Opacity: s.stopOpacity, StopColor: col}
+	for _, a := range attrs {
+		if a.Name.Local == "offset" {
+			var err error
+			stop.Offset, err = readFraction(a.Value)
 			if err != nil {
 				return err
 			}
 		}
-		c.grad.Stops = append(c.grad.Stops, stop)
 	}
-	return nil
-}
-
-func drawUse(c *IconCursor, attrs []xml.Attr) error {
-	var (
-		href string
-		x, y float64
-		err  error
-	)
-	for _, attr := range attrs {
-		switch attr.Name.Local {
-		case "href":
-			href = attr.Value
-		case "x":
-			x, err = parseFloat(attr.Value, 64)
-		case "y":
-			y, err = parseFloat(attr.Value, 64)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	// Translate the Style adder matrix by use's x and y
-	c.StyleStack[len(c.StyleStack)-1].mAdder.M = c.StyleStack[len(c.StyleStack)-1].mAdder.M.Translate(x, y)
-	if href == "" {
-		return errors.New("only use tags with href is supported")
-	}
-	if !strings.HasPrefix(href, "#") {
-		return errors.New("only the ID CSS selector is supported")
-	}
-	defs, ok := c.icon.Defs[href[1:]]
-	if !ok {
-		return errors.New("href ID in use statement was not found in saved defs")
-	}
-	for _, def := range defs {
-		if def.Tag == "endg" {
-			// pop style
-			c.StyleStack = c.StyleStack[:len(c.StyleStack)-1]
-			continue
-		}
-		if err = c.PushStyle(def.Attrs); err != nil {
-			return err
-		}
-
-		err = draw(def.Tag, c, def.Attrs)
-		if err != nil {
-			if c.ErrorMode == StrictErrorMode {
-				return err
-			} else if c.ErrorMode == WarnErrorMode {
-				log.Println(err)
-			}
-			return nil
-		}
-
-		// Did c.Path get added to during the drawFunction call iteration?
-		if len(c.Path) > 0 {
-			// The cursor parsed a path from the xml element
-			pathCopy := make(rasterx.Path, len(c.Path))
-			copy(pathCopy, c.Path)
-			c.icon.SVGPaths = append(c.icon.SVGPaths, SvgPath{c.StyleStack[len(c.StyleStack)-1], pathCopy})
-			c.Path = c.Path[:0]
-		}
-		if def.Tag != "g" {
-			// pop style
-			c.StyleStack = c.StyleStack[:len(c.StyleStack)-1]
-		}
-	}
+	c.grad.Stops = append(c.grad.Stops, stop)
 	return nil
 }

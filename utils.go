@@ -7,7 +7,9 @@ package oksvg
 
 import (
 	"errors"
+	"fmt"
 	"image/color"
+	"math"
 	"strconv"
 	"strings"
 
@@ -28,11 +30,17 @@ func parseColorValue(v string) (uint8, error) {
 		if err != nil {
 			return 0, err
 		}
-		return uint8(n * 0xFF / 100), nil
+		if !isFinite(n) {
+			return 0, errParamMismatch
+		}
+		return uint8(math.Round(clampUnit(n/100) * 255)), nil
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(v))
 	if n > 255 {
 		n = 255
+	}
+	if n < 0 {
+		n = 0
 	}
 	return uint8(n), err
 }
@@ -52,14 +60,21 @@ func trimSuffixes(a string) (b string) {
 // parseFloat is a helper function that strips suffixes before passing to strconv.ParseFloat
 func parseFloat(s string, bitSize int) (float64, error) {
 	val := trimSuffixes(s)
-	return strconv.ParseFloat(val, bitSize)
+	n, err := strconv.ParseFloat(val, bitSize)
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return 0, fmt.Errorf("non-finite SVG number %q", s)
+	}
+	return n, nil
 }
 
 // splitOnCommaOrSpace returns a list of strings after splitting the input on comma and space delimiters
 func splitOnCommaOrSpace(s string) []string {
 	return strings.FieldsFunc(s,
 		func(r rune) bool {
-			return r == ',' || r == ' '
+			return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
 		})
 }
 

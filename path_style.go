@@ -13,6 +13,10 @@ import (
 
 // PathStyle holds the state of the SVG style.
 type PathStyle struct {
+	color                             any
+	stopColor                         any
+	stopOpacity                       float64
+	display, visible                  bool
 	FillOpacity, LineOpacity          float64
 	LineWidth, DashOffset, MiterLimit float64
 	Dash                              []float64
@@ -29,11 +33,13 @@ type PathStyle struct {
 type styleAttribute = map[string]string
 
 // DefaultStyle sets the default PathStyle to fill black, winding rule,
-// full opacity, no stroke, ButtCap line end and Bevel line connect.
+// full opacity, no stroke, ButtCap line end and Miter line connect.
 var DefaultStyle = PathStyle{
-	1.0, 1.0, 2.0, 0.0, 4.0, nil, true,
-	color.NRGBA{0x00, 0x00, 0x00, 0xff},
-	nil,
-	nil, nil, rasterx.ButtCap, rasterx.Bevel,
-	rasterx.MatrixAdder{M: rasterx.Identity},
+	FillOpacity: 1, LineOpacity: 1, LineWidth: 1, MiterLimit: 4, UseNonZeroWinding: true,
+	fillerColor: color.NRGBA{A: 255}, color: color.NRGBA{A: 255}, stopColor: color.NRGBA{A: 255}, stopOpacity: 1,
+	LineCap: rasterx.ButtCap, LineJoin: rasterx.Miter,
+	mAdder: rasterx.MatrixAdder{M: rasterx.Identity}, display: true, visible: true,
 }
+
+type currentColorPaint struct{}
+type paintReference string

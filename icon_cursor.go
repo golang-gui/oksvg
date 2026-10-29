@@ -7,9 +7,10 @@ package oksvg
 
 import (
 	"encoding/xml"
+	"fmt"
 	"image/color"
-	"log"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/srwiley/rasterx"
@@ -18,11 +19,9 @@ import (
 // IconCursor is used while parsing SVG files.
 type IconCursor struct {
 	PathCursor
-	icon                                                 *SvgIcon
-	StyleStack                                           []PathStyle
-	grad                                                 *rasterx.Gradient
-	inTitleText, inDescText, inGrad, inDefs, inDefsStyle bool
-	currentDef                                           []definition
+	icon       *SvgIcon
+	StyleStack []PathStyle
+	grad       *rasterx.Gradient
 }
 
 // ReadGradURL reads an SVG format gradient url
@@ -47,13 +46,15 @@ func (c *IconCursor) ReadGradURL(v string, defaultColor any) (grad rasterx.Gradi
 func (c *IconCursor) ReadGradAttr(attr xml.Attr) (err error) {
 	switch attr.Name.Local {
 	case "gradientTransform":
-		c.grad.Matrix, err = c.parseTransform(attr.Value)
+		c.grad.Matrix, err = c.parseTransform(attr.Value, rasterx.Identity)
 	case "gradientUnits":
 		switch strings.TrimSpace(attr.Value) {
 		case "userSpaceOnUse":
 			c.grad.Units = rasterx.UserSpaceOnUse
 		case "objectBoundingBox":
 			c.grad.Units = rasterx.ObjectBoundingBox
+		default:
+			return fmt.Errorf("invalid gradientUnits %q", attr.Value)
 		}
 	case "spreadMethod":
 		switch strings.TrimSpace(attr.Value) {
@@ -63,43 +64,89 @@ func (c *IconCursor) ReadGradAttr(attr xml.Attr) (err error) {
 			c.grad.Spread = rasterx.ReflectSpread
 		case "repeat":
 			c.grad.Spread = rasterx.RepeatSpread
+		default:
+			return fmt.Errorf("invalid spreadMethod %q", attr.Value)
 		}
 	}
 	return
 }
 
-// PushStyle parses the style element, and push it on the style stack. Only color and opacity are supported
-// for fill. Note that this parses both the contents of a style attribute plus
-// direct fill and opacity attributes.
+// PushStyle computes presentation attributes, class rules and inline style
+// against the current parent, then pushes the element style.
 func (c *IconCursor) PushStyle(attrs []xml.Attr) error {
-	var pairs []string
-	className := ""
+	parent := c.StyleStack[len(c.StyleStack)-1]
+	curStyle := parent
+	// display and stop properties do not inherit. color and visibility do.
+	curStyle.display = true
+	curStyle.stopColor = color.NRGBA{A: 255}
+	curStyle.stopOpacity = 1
+	presentation := make(styleAttribute)
+	var inline, className string
 	for _, attr := range attrs {
-		switch strings.ToLower(attr.Name.Local) {
+		if attr.Name.Space != "" {
+			continue
+		}
+		switch attr.Name.Local {
 		case "style":
-			pairs = append(pairs, strings.Split(attr.Value, ";")...)
+			inline = attr.Value
 		case "class":
 			className = attr.Value
 		default:
-			pairs = append(pairs, attr.Name.Local+":"+attr.Value)
+			presentation[attr.Name.Local] = attr.Value
 		}
 	}
-	// Make a copy of the top style
-	curStyle := c.StyleStack[len(c.StyleStack)-1]
-	for _, pair := range pairs {
-		kv := strings.Split(pair, ":")
-		if len(kv) >= 2 {
-			k := strings.ToLower(kv[0])
-			k = strings.TrimSpace(k)
-			v := strings.TrimSpace(kv[1])
-			err := c.readStyleAttr(&curStyle, k, v)
-			if err != nil {
-				return err
+	classSet := make(map[string]bool)
+	for _, name := range strings.Fields(className) {
+		classSet[name] = true
+	}
+	for _, rule := range c.icon.classRules {
+		if classSet[rule.name] {
+			for k, v := range rule.attributes {
+				presentation[k] = v
 			}
 		}
 	}
-	c.adaptClasses(&curStyle, className)
-	c.StyleStack = append(c.StyleStack, curStyle) // Push style onto stack
+	if inline != "" {
+		attrs, err := parseAttrs(inline)
+		if err != nil {
+			return err
+		}
+		for k, v := range attrs {
+			presentation[k] = v
+		}
+	}
+	keys := make([]string, 0, len(presentation))
+	for k := range presentation {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	// currentColor is resolved on leaves; color itself must be computed first.
+	if v, ok := presentation["color"]; ok {
+		if err := c.readStyleAttr(&curStyle, "color", strings.TrimSpace(v)); err != nil {
+			return err
+		}
+	}
+	for _, k := range keys {
+		if k == "color" {
+			continue
+		}
+		v := strings.TrimSpace(presentation[k])
+		if v == "inherit" {
+			switch k {
+			case "display":
+				curStyle.display = parent.display
+			case "stop-color":
+				curStyle.stopColor = parent.stopColor
+			case "stop-opacity":
+				curStyle.stopOpacity = parent.stopOpacity
+			}
+			continue
+		}
+		if err := c.readStyleAttr(&curStyle, k, v); err != nil {
+			return err
+		}
+	}
+	c.StyleStack = append(c.StyleStack, curStyle)
 	return nil
 }
 
@@ -138,7 +185,7 @@ func (c *IconCursor) readTransformAttr(m1 rasterx.Matrix2D, k string) (rasterx.M
 		}
 	case "scale":
 		if ln == 1 {
-			m1 = m1.Scale(c.points[0], 0)
+			m1 = m1.Scale(c.points[0], c.points[0])
 		} else if ln == 2 {
 			m1 = m1.Scale(c.points[0], c.points[1])
 		} else {
@@ -163,55 +210,100 @@ func (c *IconCursor) readTransformAttr(m1 rasterx.Matrix2D, k string) (rasterx.M
 	return m1, nil
 }
 
-func (c *IconCursor) parseTransform(v string) (rasterx.Matrix2D, error) {
-	ts := strings.Split(v, ")")
-	m1 := c.StyleStack[len(c.StyleStack)-1].mAdder.M
-	for _, t := range ts {
-		t = strings.TrimSpace(t)
-		if len(t) == 0 {
-			continue
+func (c *IconCursor) parseTransform(v string, base rasterx.Matrix2D) (rasterx.Matrix2D, error) {
+	m1 := base
+	for v = strings.TrimSpace(v); v != ""; v = strings.TrimLeft(v, " \t\r\n,") {
+		open, close := strings.IndexByte(v, '('), strings.IndexByte(v, ')')
+		if open <= 0 || close < open {
+			return m1, errParamMismatch
 		}
-		d := strings.Split(t, "(")
-		if len(d) != 2 || len(d[1]) < 1 {
-			return m1, errParamMismatch // badly formed transformation
-		}
-		err := c.GetPoints(d[1])
+		err := c.GetPoints(v[open+1 : close])
 		if err != nil {
 			return m1, err
 		}
-		m1, err = c.readTransformAttr(m1, strings.ToLower(strings.TrimSpace(d[0])))
+		m1, err = c.readTransformAttr(m1, strings.ToLower(strings.TrimSpace(v[:open])))
 		if err != nil {
 			return m1, err
 		}
+		for _, n := range [...]float64{m1.A, m1.B, m1.C, m1.D, m1.E, m1.F} {
+			if !isFinite(n) {
+				return m1, fmt.Errorf("non-finite transform")
+			}
+		}
+		v = v[close+1:]
 	}
 	return m1, nil
 }
 
 func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
+	if v == "inherit" {
+		return nil
+	}
 	switch k {
-	case "fill":
-		gradient, ok := c.ReadGradURL(v, curStyle.fillerColor)
-		if ok {
-			curStyle.fillerColor = gradient
-			break
+	case "color":
+		if v == "currentColor" {
+			return nil
 		}
-		var err error
-		curStyle.fillerColor, err = ParseSVGColor(v)
-		return err
-	case "stroke":
-		gradient, ok := c.ReadGradURL(v, curStyle.linerColor)
-		if ok {
-			curStyle.linerColor = gradient
-			break
+		clr, err := ParseSVGColor(v)
+		if err != nil {
+			return err
 		}
-		col, errc := ParseSVGColor(v)
-		if errc != nil {
-			return errc
+		if clr == nil {
+			return fmt.Errorf("invalid color %q", v)
 		}
-		if col != nil {
-			curStyle.linerColor = col.(color.NRGBA)
+		curStyle.color = clr
+	case "fill", "stroke", "stop-color":
+		var paint any
+		if v == "currentColor" {
+			paint = currentColorPaint{}
+		} else if strings.HasPrefix(v, "url(") {
+			if !strings.HasSuffix(v, ")") {
+				return fmt.Errorf("invalid paint reference %q", v)
+			}
+			href := strings.Trim(strings.TrimSpace(v[4:len(v)-1]), "\"'")
+			if !strings.HasPrefix(href, "#") || len(href) == 1 {
+				return c.unsupported("external paint reference")
+			}
+			paint = paintReference(href[1:])
 		} else {
-			curStyle.linerColor = nil
+			var err error
+			paint, err = ParseSVGColor(v)
+			if err != nil {
+				return err
+			}
+		}
+		switch k {
+		case "fill":
+			curStyle.fillerColor = paint
+		case "stroke":
+			curStyle.linerColor = paint
+		case "stop-color":
+			curStyle.stopColor = paint
+		}
+	case "fill-rule":
+		switch v {
+		case "nonzero":
+			curStyle.UseNonZeroWinding = true
+		case "evenodd":
+			curStyle.UseNonZeroWinding = false
+		default:
+			return fmt.Errorf("invalid fill-rule %q", v)
+		}
+	case "display":
+		curStyle.display = v != "none"
+	case "visibility":
+		curStyle.visible = v != "hidden" && v != "collapse"
+	case "clip-path", "mask", "filter":
+		if v != "none" {
+			return c.unsupported(k)
+		}
+	case "vector-effect":
+		if v != "none" {
+			return c.unsupported(k)
+		}
+	case "color-interpolation":
+		if v != "sRGB" && v != "auto" {
+			return c.unsupported(k + " " + v)
 		}
 	case "stroke-linegap":
 		switch v {
@@ -270,11 +362,17 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 		if err != nil {
 			return err
 		}
+		if mLimit < 1 {
+			return fmt.Errorf("invalid miter limit")
+		}
 		curStyle.MiterLimit = mLimit
 	case "stroke-width":
 		width, err := parseFloat(v, 64)
 		if err != nil {
 			return err
+		}
+		if width < 0 {
+			return fmt.Errorf("negative stroke width")
 		}
 		curStyle.LineWidth = width
 	case "stroke-dashoffset":
@@ -284,6 +382,7 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 		}
 		curStyle.DashOffset = dashOffset
 	case "stroke-dasharray":
+		curStyle.Dash = nil
 		if v != "none" {
 			dashes := splitOnCommaOrSpace(v)
 			dList := make([]float64, len(dashes))
@@ -292,77 +391,38 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 				if err != nil {
 					return err
 				}
+				if d < 0 {
+					return fmt.Errorf("negative dash length")
+				}
 				dList[i] = d
 			}
 			curStyle.Dash = dList
 			break
 		}
-	case "opacity", "stroke-opacity", "fill-opacity":
-		op, err := parseFloat(v, 64)
+	case "opacity", "stroke-opacity", "fill-opacity", "stop-opacity":
+		op, err := readFraction(v)
 		if err != nil {
 			return err
 		}
-		if k != "stroke-opacity" {
-			curStyle.FillOpacity *= op
-		}
-		if k != "fill-opacity" {
-			curStyle.LineOpacity *= op
+		op = clampUnit(op)
+		switch k {
+		case "opacity":
+			if op != 1 {
+				return c.unsupported("object/group opacity")
+			}
+		case "fill-opacity":
+			curStyle.FillOpacity = op
+		case "stroke-opacity":
+			curStyle.LineOpacity = op
+		case "stop-opacity":
+			curStyle.stopOpacity = op
 		}
 	case "transform":
-		m, err := c.parseTransform(v)
+		m, err := c.parseTransform(v, curStyle.mAdder.M)
 		if err != nil {
 			return err
 		}
 		curStyle.mAdder.M = m
 	}
 	return nil
-}
-
-func (c *IconCursor) readStartElement(se xml.StartElement) (err error) {
-	skipDef := se.Name.Local == "radialGradient" || se.Name.Local == "linearGradient" || c.inGrad
-	if c.inDefs && !skipDef {
-		ID := ""
-		for _, attr := range se.Attr {
-			if attr.Name.Local == "id" {
-				ID = attr.Value
-			}
-		}
-		if ID != "" && len(c.currentDef) > 0 {
-			c.icon.Defs[c.currentDef[0].ID] = c.currentDef
-		}
-		c.currentDef = append(c.currentDef, definition{
-			ID:    ID,
-			Tag:   se.Name.Local,
-			Attrs: se.Attr,
-		})
-		return nil
-	}
-	err = draw(se.Name.Local, c, se.Attr)
-	if err != nil {
-		if c.ErrorMode == StrictErrorMode {
-			return err
-		} else if c.ErrorMode == WarnErrorMode {
-			log.Println(err)
-		}
-		return nil
-	}
-
-	if len(c.Path) > 0 {
-		// The cursor parsed a path from the xml element
-		pathCopy := make(rasterx.Path, len(c.Path))
-		copy(pathCopy, c.Path)
-		c.icon.SVGPaths = append(c.icon.SVGPaths,
-			SvgPath{c.StyleStack[len(c.StyleStack)-1], pathCopy})
-		c.Path = c.Path[:0]
-	}
-	return
-}
-
-func (c *IconCursor) adaptClasses(pathStyle *PathStyle, className string) {
-	if className == "" || len(c.icon.classes) == 0 {
-		return
-	}
-	for k, v := range c.icon.classes[className] {
-		c.readStyleAttr(pathStyle, k, v)
-	}
 }

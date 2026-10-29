@@ -3,7 +3,10 @@
 package oksvg_test
 
 import (
+	"fmt"
 	"image"
+	"image/color"
+	"strings"
 	"testing"
 
 	. "github.com/golang-gui/oksvg"
@@ -79,6 +82,67 @@ func BenchmarkSportsIcons(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, ic := range sportsIcons {
 			ic.Draw(raster2, 1.0)
+		}
+	}
+}
+
+func TestDocumentErrors(t *testing.T) {
+	for _, src := range []string{
+		``, `<g/>`, `<svg/>`, `<svg width="NaN" height="20"/>`,
+		`<svg width="20" height="20"/><svg width="20" height="20"/>`,
+		`<svg width="20" height="20" x="1" x="2"/>`,
+		`<svg width="20" height="20" viewBox="0 0 0 20"/>`,
+		`<!DOCTYPE svg [<!ENTITY item "text">]><svg width="20" height="20">&item;</svg>`,
+		`<svg width="20" height="20"><use href="#missing"/></svg>`,
+		`<svg width="20" height="20"><defs><g id="a"><use href="#a"/></g></defs><use href="#a"/></svg>`,
+		`<svg width="20" height="20"><rect fill="url(#missing)" width="4" height="4"/></svg>`,
+		`<svg width="20" height="20"><path d="M?"/></svg>`,
+		`<svg width="20" height="20"><path d="M0 0 X2 2"/></svg>`,
+		`<svg width="20" height="20"><rect transform="rotate(2"/></svg>`,
+		`<svg width="20" height="20"><defs><radialGradient id="g" r="-1"/></defs></svg>`,
+		`<svg width="20" height="20"><defs><linearGradient id="g" href="#h"/><linearGradient id="h" href="#g"/></defs></svg>`,
+	} {
+		if icon, err := ReadIconStream(strings.NewReader(src), StrictErrorMode); err == nil || icon != nil {
+			t.Fatalf("malformed document accepted: %q, %v", src, err)
+		}
+	}
+	if _, err := ReadIconStream(nil); err == nil {
+		t.Fatal("nil reader accepted")
+	}
+}
+
+func TestDocumentLimits(t *testing.T) {
+	for _, body := range []string{
+		strings.Repeat(`<g>`, 70) + strings.Repeat(`</g>`, 70),
+		func() string {
+			var b strings.Builder
+			b.WriteString(`<defs>`)
+			for i := 0; i < 70; i++ {
+				fmt.Fprintf(&b, `<linearGradient id="g%d" href="#g%d"/>`, i, i+1)
+			}
+			b.WriteString(`<linearGradient id="g70"/></defs>`)
+			return b.String()
+		}(),
+	} {
+		if icon, err := ReadIconStream(strings.NewReader(`<svg width="20" height="20">`+body+`</svg>`), StrictErrorMode); err == nil || icon != nil {
+			t.Fatal("excessive nesting/reference depth accepted")
+		}
+	}
+}
+
+func TestSVGColorEdgeCases(t *testing.T) {
+	for _, src := range []string{"hsl(0,,)", "hsl(0,%,)", "rgba(0,0,0,NaN)"} {
+		if _, err := ParseSVGColor(src); err == nil {
+			t.Fatalf("invalid color accepted: %s", src)
+		}
+	}
+	for _, src := range []string{"#f008", "#ff000088", "rgba(255,0,0,53.3333333333%)"} {
+		got, err := ParseSVGColor(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := color.NRGBAModel.Convert(got).(color.NRGBA); n != (color.NRGBA{R: 255, A: 136}) {
+			t.Fatalf("%s => %v", src, n)
 		}
 	}
 }

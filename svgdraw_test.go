@@ -180,6 +180,16 @@ func TestTestIcons(t *testing.T) {
 		"astronaut", "jupiter", "lander", "school-bus", "telescope", "content-cut-light", "defs",
 		"24px", "badelement",
 	} {
+		if p == "badelement" {
+			// This fixture contains malformed cubic parameters. Invalid geometry now
+			// returns an error in every mode instead of silently returning a partial icon.
+			for _, mode := range []ErrorMode{IgnoreErrorMode, WarnErrorMode, StrictErrorMode} {
+				if icon, err := ReadIcon("testdata/testIcons/"+p+".svg", mode); err == nil || icon != nil {
+					t.Errorf("malformed path returned a partial icon: %v", err)
+				}
+			}
+			continue
+		}
 		SaveIcon(t, "testdata/testIcons/"+p+".svg")
 	}
 }

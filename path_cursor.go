@@ -7,8 +7,9 @@ package oksvg
 
 import (
 	"errors"
-	"log"
 	"math"
+	"regexp"
+	"strings"
 	"unicode"
 
 	"github.com/srwiley/rasterx"
@@ -77,33 +78,26 @@ func (c *PathCursor) ReadFloat(numStr string) error {
 
 // GetPoints reads a set of floating point values from the SVG format number string,
 // and add them to the cursor's points slice.
+var svgNumber = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`)
+
 func (c *PathCursor) GetPoints(dataPoints string) error {
-	lastIndex := -1
-	c.points = c.points[0:0]
-	lr := ' '
-	for i, r := range dataPoints {
-		if !unicode.IsNumber(r) && r != '.' && !(r == '-' && lr == 'e') && r != 'e' {
-			if lastIndex != -1 {
-				if err := c.ReadFloat(dataPoints[lastIndex:i]); err != nil {
-					return err
-				}
-			}
-			if r == '-' {
-				lastIndex = i
-			} else {
-				lastIndex = -1
-			}
-		} else if lastIndex == -1 {
-			lastIndex = i
+	c.points = c.points[:0]
+	for {
+		dataPoints = strings.TrimLeft(dataPoints, " \t\r\n,")
+		if dataPoints == "" {
+			return nil
 		}
-		lr = r
-	}
-	if lastIndex != -1 && lastIndex != len(dataPoints) {
-		if err := c.ReadFloat(dataPoints[lastIndex:]); err != nil {
+		token := svgNumber.FindString(dataPoints)
+		if token == "" {
+			return errParamMismatch
+		}
+		n, err := parseFloat(token, 64)
+		if err != nil {
 			return err
 		}
+		c.points = append(c.points, n)
+		dataPoints = dataPoints[len(token):]
 	}
-	return nil
 }
 
 // EllipseAt adds a path of an elipse centered at cx, cy of radius rx and ry
@@ -134,7 +128,7 @@ func (c *PathCursor) CompilePath(svgPath string) error {
 	c.init()
 	lastIndex := -1
 	for i, v := range svgPath {
-		if unicode.IsLetter(v) && v != 'e' {
+		if unicode.IsLetter(v) && v != 'e' && v != 'E' {
 			if lastIndex != -1 {
 				if err := c.addSeg(svgPath[lastIndex:i]); err != nil {
 					return err
@@ -143,7 +137,13 @@ func (c *PathCursor) CompilePath(svgPath string) error {
 			lastIndex = i
 		}
 	}
+	if lastIndex == -1 && strings.TrimSpace(svgPath) != "" {
+		return errParamMismatch
+	}
 	if lastIndex != -1 {
+		if strings.TrimSpace(svgPath[:strings.IndexFunc(svgPath, func(r rune) bool { return unicode.IsLetter(r) })]) != "" {
+			return errParamMismatch
+		}
 		if err := c.addSeg(svgPath[lastIndex:]); err != nil {
 			return err
 		}
@@ -390,12 +390,7 @@ func (c *PathCursor) addSeg(segString string) error {
 			c.AddArcFromA(c.points[i:])
 		}
 	default:
-		if c.ErrorMode == StrictErrorMode {
-			return errCommandUnknown
-		}
-		if c.ErrorMode == WarnErrorMode {
-			log.Println("Ignoring svg command " + string(k))
-		}
+		return errCommandUnknown
 	}
 	// So we know how to extend some segment types
 	c.lastKey = k

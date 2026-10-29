@@ -7,7 +7,6 @@ package oksvg
 
 import (
 	"bytes"
-	"encoding/xml"
 	"fmt"
 	"image/color"
 	"io"
@@ -16,9 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/srwiley/rasterx"
 	"golang.org/x/image/colornames"
-	"golang.org/x/net/html/charset"
 )
 
 // ReadIconStream reads the Icon from the given io.Reader.
@@ -28,82 +25,11 @@ import (
 // if it does not handle an element found in the icon file. Ignore warnings is
 // the default if no ErrorMode value is provided.
 func ReadIconStream(stream io.Reader, errMode ...ErrorMode) (*SvgIcon, error) {
-	icon := &SvgIcon{Defs: make(map[string][]definition), Grads: make(map[string]*rasterx.Gradient), Transform: rasterx.Identity}
-	cursor := &IconCursor{StyleStack: []PathStyle{DefaultStyle}, icon: icon}
+	mode := IgnoreErrorMode
 	if len(errMode) > 0 {
-		cursor.ErrorMode = errMode[0]
+		mode = errMode[0]
 	}
-	classInfo := ""
-	decoder := xml.NewDecoder(stream)
-	decoder.CharsetReader = charset.NewReaderLabel
-	for {
-		t, err := decoder.Token()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return icon, err
-		}
-		// Inspect the type of the XML token
-		switch se := t.(type) {
-		case xml.StartElement:
-			// Reads all recognized style attributes from the start element
-			// and places it on top of the styleStack
-			err = cursor.PushStyle(se.Attr)
-			if err != nil {
-				return icon, err
-			}
-			err = cursor.readStartElement(se)
-			if err != nil {
-				return icon, err
-			}
-			if se.Name.Local == "style" && cursor.inDefs {
-				cursor.inDefsStyle = true
-			}
-		case xml.EndElement:
-			// pop style
-			cursor.StyleStack = cursor.StyleStack[:len(cursor.StyleStack)-1]
-			switch se.Name.Local {
-			case "g":
-				if cursor.inDefs {
-					cursor.currentDef = append(cursor.currentDef, definition{
-						Tag: "endg",
-					})
-				}
-			case "title":
-				cursor.inTitleText = false
-			case "desc":
-				cursor.inDescText = false
-			case "defs":
-				if len(cursor.currentDef) > 0 {
-					cursor.icon.Defs[cursor.currentDef[0].ID] = cursor.currentDef
-				}
-				cursor.inDefs = false
-			case "radialGradient", "linearGradient":
-				cursor.inGrad = false
-
-			case "style":
-				if cursor.inDefsStyle {
-					icon.classes, err = parseClasses(classInfo)
-					if err != nil {
-						return icon, err
-					}
-					cursor.inDefsStyle = false
-				}
-			}
-		case xml.CharData:
-			if cursor.inTitleText {
-				icon.Titles[len(icon.Titles)-1] += string(se)
-			}
-			if cursor.inDescText {
-				icon.Descriptions[len(icon.Descriptions)-1] += string(se)
-			}
-			if cursor.inDefsStyle {
-				classInfo = string(se)
-			}
-		}
-	}
-	return icon, nil
+	return parseDocument(stream, mode)
 }
 
 // ReadReplacingCurrentColor replaces currentColor value with specified value and loads SvgIcon as ReadIconStream do.
@@ -173,10 +99,52 @@ func ParseSVGColorNum(colorStr string) (r, g, b uint8, err error) {
 // including all SVG1.1 names, obtained from the image.colornames package
 func ParseSVGColor(colorStr string) (color.Color, error) {
 	// _, _, _, a := curColor.RGBA()
+	colorStr = strings.TrimSpace(colorStr)
 	v := strings.ToLower(colorStr)
-	if strings.HasPrefix(v, "url") { // We are not handling urls
-		// and gradients and stuff at this point
-		return color.NRGBA{0, 0, 0, 255}, nil
+	if strings.HasPrefix(v, "url(") {
+		return nil, fmt.Errorf("paint references require a document")
+	}
+	if v == "transparent" {
+		return color.NRGBA{}, nil
+	}
+	if strings.HasPrefix(v, "#") && (len(v) == 5 || len(v) == 9) {
+		hex := v[1:]
+		if len(hex) == 4 {
+			var expanded strings.Builder
+			for _, r := range hex {
+				expanded.WriteRune(r)
+				expanded.WriteRune(r)
+			}
+			hex = expanded.String()
+		}
+		rgba, err := strconv.ParseUint(hex, 16, 32)
+		if err != nil {
+			return nil, err
+		}
+		return color.NRGBA{R: uint8(rgba >> 24), G: uint8(rgba >> 16), B: uint8(rgba >> 8), A: uint8(rgba)}, nil
+	}
+	if strings.HasPrefix(v, "rgba(") && strings.HasSuffix(v, ")") {
+		args := strings.Split(v[5:len(v)-1], ",")
+		if len(args) != 4 {
+			return nil, errParamMismatch
+		}
+		r, err := parseColorValue(strings.TrimSpace(args[0]))
+		if err != nil {
+			return nil, err
+		}
+		g, err := parseColorValue(strings.TrimSpace(args[1]))
+		if err != nil {
+			return nil, err
+		}
+		b, err := parseColorValue(strings.TrimSpace(args[2]))
+		if err != nil {
+			return nil, err
+		}
+		a, err := readFraction(args[3])
+		if err != nil {
+			return nil, err
+		}
+		return color.NRGBA{R: r, G: g, B: b, A: uint8(math.Round(clampUnit(a) * 255))}, nil
 	}
 	switch v {
 	case "none", "":
@@ -190,8 +158,8 @@ func ParseSVGColor(colorStr string) (color.Color, error) {
 			return color.NRGBA{uint8(r), uint8(g), uint8(b), uint8(a)}, nil
 		}
 	}
-	cStr := strings.TrimPrefix(colorStr, "rgb(")
-	if cStr != colorStr {
+	cStr := strings.TrimPrefix(v, "rgb(")
+	if cStr != v {
 		cStr := strings.TrimSuffix(cStr, ")")
 		vals := strings.Split(cStr, ",")
 		if len(vals) != 3 {
@@ -208,8 +176,8 @@ func ParseSVGColor(colorStr string) (color.Color, error) {
 		return color.NRGBA{cvals[0], cvals[1], cvals[2], 0xFF}, nil
 	}
 
-	cStr = strings.TrimPrefix(colorStr, "hsl(")
-	if cStr != colorStr {
+	cStr = strings.TrimPrefix(v, "hsl(")
+	if cStr != v {
 		cStr := strings.TrimSuffix(cStr, ")")
 		vals := strings.Split(cStr, ",")
 		if len(vals) != 3 {
@@ -221,13 +189,16 @@ func ParseSVGColor(colorStr string) (color.Color, error) {
 			return color.NRGBA{}, fmt.Errorf("invalid hue in hsl: '%s' (%s)", vals[0], err)
 		}
 
-		S, err := strconv.ParseFloat(strings.TrimSpace(vals[1][:len(vals[1])-1]), 64)
+		if !strings.HasSuffix(strings.TrimSpace(vals[1]), "%") || !strings.HasSuffix(strings.TrimSpace(vals[2]), "%") {
+			return nil, errParamMismatch
+		}
+		S, err := parseFloat(strings.TrimSuffix(strings.TrimSpace(vals[1]), "%"), 64)
 		if err != nil {
 			return color.NRGBA{}, fmt.Errorf("invalid saturation in hsl: '%s' (%s)", vals[1], err)
 		}
 		S = S / 100
 
-		L, err := strconv.ParseFloat(strings.TrimSpace(vals[2][:len(vals[2])-1]), 64)
+		L, err := parseFloat(strings.TrimSuffix(strings.TrimSpace(vals[2]), "%"), 64)
 		if err != nil {
 			return color.NRGBA{}, fmt.Errorf("invalid lightness in hsl: '%s' (%s)", vals[2], err)
 		}

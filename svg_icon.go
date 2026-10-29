@@ -18,7 +18,8 @@ type SvgIcon struct {
 	Defs         map[string][]definition
 	SVGPaths     []SvgPath
 	Transform    rasterx.Matrix2D
-	classes      map[string]styleAttribute
+	aspect       aspectRatio
+	classRules   []classRule
 }
 
 // Draw the compiled SVG icon into the GraphicContext.
@@ -33,5 +34,10 @@ func (s *SvgIcon) Draw(r *rasterx.Dasher, opacity float64) {
 func (s *SvgIcon) SetTarget(x, y, w, h float64) {
 	scaleW := w / s.ViewBox.W
 	scaleH := h / s.ViewBox.H
-	s.Transform = rasterx.Identity.Translate(x-s.ViewBox.X, y-s.ViewBox.Y).Scale(scaleW, scaleH)
+	s.Transform = rasterx.Identity.Translate(x, y).Scale(scaleW, scaleH).Translate(-s.ViewBox.X, -s.ViewBox.Y)
+}
+
+type classRule struct {
+	name       string
+	attributes styleAttribute
 }
