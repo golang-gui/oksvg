@@ -75,7 +75,7 @@ func (svgp *SvgPath) DrawTransformed(r *rasterx.Dasher, opacity float64, t raste
 			offset += total
 		}
 	}
-	local.SetStroke(fixed.Int26_6(svgp.LineWidth*scale*64), fixed.Int26_6(svgp.MiterLimit*64), lead, cap, svgp.LineGap, svgp.LineJoin, dash, offset)
+	local.SetStroke(fixed.Int26_6(math.Round(svgp.LineWidth*scale*64)), fixed.Int26_6(math.Round(svgp.MiterLimit*64)), lead, cap, svgp.LineGap, svgp.LineJoin, dash, offset)
 	local.SetColor(pathPaint(svgp.linerColor, svgp.LineOpacity*opacity, m, bounds))
 	svgp.Path.AddTo(&rasterx.MatrixAdder{Adder: local, M: rasterx.Identity.Scale(scale, scale)})
 	local.Draw()

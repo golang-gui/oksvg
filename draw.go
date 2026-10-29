@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/golang-gui/rasterx"
-	"golang.org/x/image/math/fixed"
 )
 
 func draw(name string, c *IconCursor, attrs []xml.Attr) error {
@@ -198,14 +197,8 @@ func drawLine(c *IconCursor, attrs []xml.Attr) error {
 			return err
 		}
 	}
-	c.Path.Start(fixed.Point26_6{
-		X: fixed.Int26_6((x1) * 64),
-		Y: fixed.Int26_6((y1) * 64),
-	})
-	c.Path.Line(fixed.Point26_6{
-		X: fixed.Int26_6((x2) * 64),
-		Y: fixed.Int26_6((y2) * 64),
-	})
+	c.Path.Start(rasterx.ToFixedP(x1, y1))
+	c.Path.Line(rasterx.ToFixedP(x2, y2))
 	return nil
 }
 
@@ -225,15 +218,9 @@ func drawPolyline(c *IconCursor, attrs []xml.Attr) error {
 		}
 	}
 	if len(c.points) >= 4 {
-		c.Path.Start(fixed.Point26_6{
-			X: fixed.Int26_6((c.points[0]) * 64),
-			Y: fixed.Int26_6((c.points[1]) * 64),
-		})
+		c.Path.Start(rasterx.ToFixedP(c.points[0], c.points[1]))
 		for i := 2; i < len(c.points)-1; i += 2 {
-			c.Path.Line(fixed.Point26_6{
-				X: fixed.Int26_6((c.points[i]) * 64),
-				Y: fixed.Int26_6((c.points[i+1]) * 64),
-			})
+			c.Path.Line(rasterx.ToFixedP(c.points[i], c.points[i+1]))
 		}
 	}
 	return nil

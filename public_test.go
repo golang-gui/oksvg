@@ -535,12 +535,16 @@ func TestOnlineCorpusFixtures(t *testing.T) {
 		{"lucide/dumbbell.svg", 85, 29, color.RGBA{A: 255}},
 		{"lucide/squirrel.svg", 36, 33, color.RGBA{A: 255}},
 		{"lucide/mop.svg", 52, 108, color.RGBA{}},
+		{"lucide/parentheses.svg", 86, 14, color.RGBA{A: 255}},
+		{"bootstrap/heptagon.svg", 64, 127, color.RGBA{A: 255}},
 		{"resvg/shapes/rect/mm-values.svg", 64, 64, color.RGBA{G: 128, A: 255}},
 		{"resvg/paint-servers/stop/stops-with-equal-offset-5.svg", 20, 64, color.RGBA{A: 255}},
 		{"resvg/paint-servers/stop/stops-with-equal-offset-6.svg", 20, 64, color.RGBA{A: 255}},
 		{"resvg/painting/fill/hsl-120-200percent-25percent.svg", 64, 64, color.RGBA{G: 128, A: 255}},
 		{"resvg/painting/fill/hsl-999-100percent-25percent.svg", 64, 64, color.RGBA{R: 83, B: 128, A: 255}},
 		{"resvg/structure/style-attribute/non-presentational-attribute.svg", 64, 64, color.RGBA{R: 255, A: 255}},
+		{"resvg/painting/stroke-dasharray/on-a-circle.svg", 57, 27, color.RGBA{G: 128, A: 255}},
+		{"resvg/painting/stroke-dasharray/n-0.svg", 22, 22, color.RGBA{}},
 	} {
 		t.Run(tt.file, func(t *testing.T) {
 			icon, err := ReadIcon("testdata/corpus/"+tt.file, StrictErrorMode)
@@ -594,6 +598,22 @@ func TestCSSGeometry(t *testing.T) {
 	}
 	if got := icon.Rasterize(20, 20).RGBAAt(10, 10); got != (color.RGBA{R: 255, A: 255}) {
 		t.Fatalf("根几何属性未生效: %v", got)
+	}
+}
+
+// 140 次 0.1 的累加应到达 y=16；浮点尾差不能在 8x 放大后留下灰色底边。
+func TestFractionalPathBoundaryCoverage(t *testing.T) {
+	path := "M2 2" + strings.Repeat("v0.1", 140) + "H14V2Z"
+	icon, err := ReadIconStream(strings.NewReader(`<svg viewBox="0 0 16 16"><path d="`+path+`"/></svg>`), StrictErrorMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := icon.Rasterize(128, 128)
+	if got := img.RGBAAt(64, 127); got != (color.RGBA{A: 255}) {
+		t.Fatalf("底部内部像素=%v，期望不透明黑色", got)
+	}
+	if got := img.RGBAAt(0, 127); got.A != 0 {
+		t.Fatalf("矩形外部像素=%v，期望透明", got)
 	}
 }
 
