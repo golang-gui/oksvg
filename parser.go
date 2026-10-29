@@ -146,7 +146,11 @@ func parseDocument(stream io.Reader, mode ErrorMode) (*SvgIcon, error) {
 	if err := c.collect(root); err != nil {
 		return nil, err
 	}
-	if err := drawSvg(c.cursor, root.attrs); err != nil {
+	presentation, err := c.cursor.styleAttributes(root.attrs)
+	if err != nil {
+		return nil, err
+	}
+	if err := drawSvg(c.cursor, geometryAttributes(root.attrs, presentation)); err != nil {
 		return nil, err
 	}
 	v := icon.ViewBox
@@ -407,7 +411,11 @@ func (c *svgCompiler) compile(e *svgElement, depth int) error {
 	if e.name == "svg" && depth > 0 {
 		return c.cursor.unsupported("nested svg")
 	}
-	if err := c.cursor.PushStyle(e.attrs); err != nil {
+	presentation, err := c.cursor.styleAttributes(e.attrs)
+	if err != nil {
+		return fmt.Errorf("%s: %w", e.name, err)
+	}
+	if err := c.cursor.pushStyle(presentation); err != nil {
 		return fmt.Errorf("%s: %w", e.name, err)
 	}
 	defer func() { c.cursor.StyleStack = c.cursor.StyleStack[:len(c.cursor.StyleStack)-1] }()
@@ -439,13 +447,13 @@ func (c *svgCompiler) compile(e *svgElement, depth int) error {
 		}
 		x, y := 0.0, 0.0
 		var err error
-		if v := e.attr("x"); v != "" {
+		if v := presentation["x"]; v != "" {
 			x, err = c.cursor.length(v, 0)
 			if err != nil {
 				return err
 			}
 		}
-		if v := e.attr("y"); v != "" {
+		if v := presentation["y"]; v != "" {
 			y, err = c.cursor.length(v, 1)
 			if err != nil {
 				return err
@@ -458,7 +466,7 @@ func (c *svgCompiler) compile(e *svgElement, depth int) error {
 			return nil
 		}
 		c.cursor.Path = nil
-		if err := draw(e.name, c.cursor, e.attrs); err != nil {
+		if err := draw(e.name, c.cursor, geometryAttributes(e.attrs, presentation)); err != nil {
 			return fmt.Errorf("%s: %w", e.name, err)
 		}
 		if len(c.cursor.Path) == 0 {
@@ -480,6 +488,41 @@ func (c *svgCompiler) compile(e *svgElement, depth int) error {
 		return c.cursor.unsupported("element " + e.name)
 	}
 	return nil
+}
+
+// geometryAttributes applies SVG 2 geometry properties to the element only.
+// Structural XML attributes such as id, href and points stay outside the CSS
+// subset. CSS d:path() is not implemented here.
+func geometryAttributes(attrs []xml.Attr, presentation styleAttribute) []xml.Attr {
+	var out []xml.Attr
+	for _, name := range [...]string{"x", "y", "width", "height", "cx", "cy", "r", "rx", "ry"} {
+		value, ok := presentation[name]
+		if !ok {
+			continue
+		}
+		index := -1
+		for i, attr := range attrs {
+			if attr.Name.Space == "" && attr.Name.Local == name {
+				index = i
+				break
+			}
+		}
+		if index >= 0 && attrs[index].Value == value {
+			continue
+		}
+		if out == nil {
+			out = append([]xml.Attr(nil), attrs...)
+		}
+		if index >= 0 {
+			out[index].Value = value
+		} else {
+			out = append(out, xml.Attr{Name: xml.Name{Local: name}, Value: value})
+		}
+	}
+	if out == nil {
+		return attrs
+	}
+	return out
 }
 
 func (c *svgCompiler) resolvePaint(value any, currentColor any) (any, error) {

@@ -540,6 +540,7 @@ func TestOnlineCorpusFixtures(t *testing.T) {
 		{"resvg/paint-servers/stop/stops-with-equal-offset-6.svg", 20, 64, color.RGBA{A: 255}},
 		{"resvg/painting/fill/hsl-120-200percent-25percent.svg", 64, 64, color.RGBA{G: 128, A: 255}},
 		{"resvg/painting/fill/hsl-999-100percent-25percent.svg", 64, 64, color.RGBA{R: 83, B: 128, A: 255}},
+		{"resvg/structure/style-attribute/non-presentational-attribute.svg", 64, 64, color.RGBA{R: 255, A: 255}},
 	} {
 		t.Run(tt.file, func(t *testing.T) {
 			icon, err := ReadIcon("testdata/corpus/"+tt.file, StrictErrorMode)
@@ -551,6 +552,48 @@ func TestOnlineCorpusFixtures(t *testing.T) {
 				t.Fatalf("(%d,%d)=%v want=%v", tt.x, tt.y, got, tt.want)
 			}
 		})
+	}
+}
+
+// SVG 2 的几何属性使用现有局部级联；内部颜色与外部透明由明确坐标独立确定。
+func TestCSSGeometry(t *testing.T) {
+	for _, tt := range []struct {
+		name, body               string
+		x, y, outsideX, outsideY int
+		want                     color.RGBA
+	}{
+		{"inline size", `<rect x="2" y="2" width="16" style="height:16px" fill="red"/>`, 10, 10, 1, 10, color.RGBA{R: 255, A: 255}},
+		{"class position", `<style>.s {x:4px;y:4px;width:12px;height:12px;fill:blue}</style><rect class="s" width="20" height="20"/>`, 10, 10, 2, 10, color.RGBA{B: 255, A: 255}},
+		{"inline precedence", `<style>.s {width:8px;height:8px;fill:red}</style><rect class="s" x="2" y="2" width="2" height="2" style="width:16px;height:16px;fill:blue"/>`, 14, 14, 1, 10, color.RGBA{B: 255, A: 255}},
+		{"geometry does not inherit", `<g style="width:20px;height:20px"><rect width="4" height="4" fill="red"/></g>`, 2, 2, 10, 10, color.RGBA{R: 255, A: 255}},
+		{"circle", `<circle cx="1" cy="1" r="1" style="cx:10px;cy:10px;r:6px" fill="blue"/>`, 14, 10, 18, 10, color.RGBA{B: 255, A: 255}},
+		{"ellipse", `<ellipse style="cx:50%;cy:50%;rx:6px;ry:4px" fill="blue"/>`, 14, 10, 10, 16, color.RGBA{B: 255, A: 255}},
+		{"rounded rectangle", `<rect x="2" y="2" width="16" height="16" style="rx:6px;ry:6px" fill="blue"/>`, 10, 10, 2, 2, color.RGBA{B: 255, A: 255}},
+		{"use position", `<defs><rect id="r" width="4" height="4" fill="blue"/></defs><use href="#r" style="x:8px;y:8px"/>`, 10, 10, 2, 2, color.RGBA{B: 255, A: 255}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			icon, err := ReadIconStream(strings.NewReader(`<svg viewBox="0 0 20 20">`+tt.body+`</svg>`), StrictErrorMode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			img := icon.Rasterize(20, 20)
+			if got := img.RGBAAt(tt.x, tt.y); got != tt.want {
+				t.Fatalf("内部 (%d,%d)=%v，期望 %v", tt.x, tt.y, got, tt.want)
+			}
+			if got := img.RGBAAt(tt.outsideX, tt.outsideY); got.A != 0 {
+				t.Fatalf("外部 (%d,%d)=%v，期望透明", tt.outsideX, tt.outsideY, got)
+			}
+		})
+	}
+	icon, err := ReadIconStream(strings.NewReader(`<svg style="width:20px;height:20px"><rect width="20" height="20" fill="red"/></svg>`), StrictErrorMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if icon.ViewBox.W != 20 || icon.ViewBox.H != 20 {
+		t.Fatalf("根尺寸 = %v，期望 20×20", icon.ViewBox)
+	}
+	if got := icon.Rasterize(20, 20).RGBAAt(10, 10); got != (color.RGBA{R: 255, A: 255}) {
+		t.Fatalf("根几何属性未生效: %v", got)
 	}
 }
 

@@ -74,12 +74,16 @@ func (c *IconCursor) ReadGradAttr(attr xml.Attr) (err error) {
 // PushStyle computes presentation attributes, class rules and inline style
 // against the current parent, then pushes the element style.
 func (c *IconCursor) PushStyle(attrs []xml.Attr) error {
-	parent := c.StyleStack[len(c.StyleStack)-1]
-	curStyle := parent
-	// display and stop properties do not inherit. color and visibility do.
-	curStyle.display = true
-	curStyle.stopColor = color.NRGBA{A: 255}
-	curStyle.stopOpacity = 1
+	presentation, err := c.styleAttributes(attrs)
+	if err != nil {
+		return err
+	}
+	return c.pushStyle(presentation)
+}
+
+// styleAttributes resolves the supported local cascade without inheriting
+// geometry. Both painting and SVG 2 geometry use the same precedence.
+func (c *IconCursor) styleAttributes(attrs []xml.Attr) (styleAttribute, error) {
 	presentation := make(styleAttribute)
 	var inline, className string
 	for _, attr := range attrs {
@@ -109,12 +113,22 @@ func (c *IconCursor) PushStyle(attrs []xml.Attr) error {
 	if inline != "" {
 		attrs, err := parseAttrs(inline)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for k, v := range attrs {
 			presentation[k] = v
 		}
 	}
+	return presentation, nil
+}
+
+func (c *IconCursor) pushStyle(presentation styleAttribute) error {
+	parent := c.StyleStack[len(c.StyleStack)-1]
+	curStyle := parent
+	// display and stop properties do not inherit. color and visibility do.
+	curStyle.display = true
+	curStyle.stopColor = color.NRGBA{A: 255}
+	curStyle.stopOpacity = 1
 	keys := make([]string, 0, len(presentation))
 	for k := range presentation {
 		keys = append(keys, k)
