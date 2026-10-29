@@ -10,6 +10,28 @@ import (
 	"github.com/golang-gui/rasterx"
 )
 
+// SVG 规定 Z 后的非 M 命令以原起点建立新子路径，不能继续已闭合的轮廓。
+func TestClosePathStartsNewSubpath(t *testing.T) {
+	for _, next := range []string{"l-8 -6", "h-8", "v-8", "c0 -8 -8 -8 -8 0", "q-8 -8 -8 0", "t-8 0", "s-8 -8 -8 0", "a8 8 0 0 1 -8 -8"} {
+		t.Run(next, func(t *testing.T) {
+			var implicit, explicit PathCursor
+			const closed = "M20 20H40V40H20z"
+			if err := implicit.CompilePath(closed + next + "z"); err != nil {
+				t.Fatal(err)
+			}
+			if err := explicit.CompilePath(closed + "M20 20" + next + "z"); err != nil {
+				t.Fatal(err)
+			}
+			if !reflectpkg.DeepEqual(implicit.Path, explicit.Path) {
+				t.Fatal("Z 后没有从 (20,20) 开始新的闭合子路径")
+			}
+			if implicit.placeX != 20 || implicit.placeY != 20 {
+				t.Fatalf("再次 Z 后终点 = (%g,%g)，期望 (20,20)", implicit.placeX, implicit.placeY)
+			}
+		})
+	}
+}
+
 // Each seven-parameter group following A/a is a separate arc. In particular,
 // relative endpoints must be based on the preceding arc's endpoint.
 func TestRepeatedArcParameters(t *testing.T) {

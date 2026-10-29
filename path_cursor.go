@@ -236,6 +236,13 @@ func (c *PathCursor) addSeg(segString string) error {
 	}
 	l := len(c.points)
 	rel := false
+	if (c.lastKey == 'z' || c.lastKey == 'Z') && k != 'm' && k != 'M' && k != 'z' && k != 'Z' {
+		// A drawing command after closepath starts a new subpath at the
+		// closed subpath's initial point, as if preceded by a moveto.
+		c.Path.Start(rasterx.ToFixedP(c.placeX, c.placeY))
+		c.pathStartX, c.pathStartY = c.placeX, c.placeY
+		c.inPath = true
+	}
 	switch k {
 	case 'z':
 		fallthrough
