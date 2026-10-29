@@ -18,6 +18,53 @@ The package can be installed by running:
 go get github.com/golang-gui/oksvg@latest
 ```
 
+### Rendering an icon
+
+```go
+icon, err := oksvg.ReadIconStream(strings.NewReader(svgSource), oksvg.StrictErrorMode)
+if err != nil {
+    return err
+}
+bitmap := icon.Rasterize(64, 64)
+```
+
+`Rasterize` returns a new, caller-owned premultiplied `*image.RGBA`, with
+transparent pixels outside the artwork. It applies `viewBox` and
+`preserveAspectRatio` (default: `xMidYMid meet`). Invalid target sizes return
+`nil`. It has no image cache and does not change `SetTarget`/`Transform` state;
+concurrent calls are safe while the parsed icon is not modified by callers.
+It uses the pure Go [scanFT](https://github.com/srwiley/scanFT) scanner for both
+nonzero and evenodd filling. No cgo or native SVG library is required.
+
+The existing `SetTarget`/`Draw` interface remains available. `SetTarget`
+explicitly stretches the viewBox to its target rectangle. A caller supplying a
+scanner to `Draw` must choose one that implements the requested winding rule;
+rasterx's `ScannerGV` does not implement evenodd filling.
+
+### Parsing and supported SVG features
+
+DOCTYPE declarations, XML metadata attributes such as `xml:space`, and foreign
+namespace metadata are accepted. The parser never fetches DTDs, expands custom
+entities, or loads external files or URLs. Foreign attributes cannot override
+ordinary SVG attributes with the same local name.
+
+The icon subset supports shapes and paths, affine transforms, local `use`
+references, simple class rules, inline styles, `currentColor`, fill rules,
+fill/stroke opacity, stroke caps/joins/dashes, and linear/radial gradients.
+Definitions may follow their uses. Inline styles override presentation
+attributes, and inherited fill/stroke opacity is overridden rather than
+multiplied by a child's declaration.
+
+`StrictErrorMode` rejects recognized unsupported rendering features, including
+object/group opacity other than 1, clipping, masks, filters, text and animation.
+Unknown attributes are ignored for forward compatibility. `IgnoreErrorMode`
+(the legacy default) and `WarnErrorMode` remain available; unsupported elements
+are skipped with their entire subtrees. Malformed XML, numbers, paths and
+missing/cyclic local references fail in every mode and return no partial icon.
+
+See [the feature list](doc/SVG_Element_List.txt) and
+[the parser/rasterization design](doc/DesignSVG.md) for scope and limitations.
+
 
 Oksvg uses the [rasterx](https://github.com/srwiley/rasterx) rasterizer package which implements full SVG2.0 path functions, including the newer 'arc' join-mode.
 
