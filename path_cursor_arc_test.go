@@ -75,3 +75,36 @@ func TestRepeatedArcsCircleCoverage(t *testing.T) {
 		}
 	}
 }
+
+// SVG 的两个 flag 是单字符，可与后续坐标连续书写。
+func TestCompactArcFlags(t *testing.T) {
+	for _, tt := range []struct {
+		compact, spaced string
+		x, y            float64
+	}{
+		{"M1 1a5 5 0 0110 0", "M1 1a5 5 0 0 1 10 0", 11, 1},
+		{"M1 1A5 5 0 0111 1", "M1 1A5 5 0 0 1 11 1", 11, 1},
+		{"M10 4a6 6 0 110 12 6 6 0 110-12", "M10 4a6 6 0 1 1 0 12 6 6 0 1 1 0-12", 10, 4},
+		{"M1 1A5 5 0 00.5.6", "M1 1A5 5 0 0 0 .5 .6", .5, .6},
+	} {
+		var a, b PathCursor
+		if err := a.CompilePath(tt.compact); err != nil {
+			t.Fatal(tt.compact, err)
+		}
+		if err := b.CompilePath(tt.spaced); err != nil {
+			t.Fatal(err)
+		}
+		if !reflectpkg.DeepEqual(a.Path, b.Path) {
+			t.Fatal("compact flags changed geometry", tt.compact)
+		}
+		if math.Abs(a.placeX-tt.x) > 1e-9 || math.Abs(a.placeY-tt.y) > 1e-9 {
+			t.Fatalf("endpoint=(%g,%g), want=(%g,%g)", a.placeX, a.placeY, tt.x, tt.y)
+		}
+	}
+	for _, d := range []string{"M0 0A5 5 0 2 0 10 10", "M0 0A5 5 0 -1 0 10 10", "M0 0A5 5 0 1.0 0 10 10"} {
+		var c PathCursor
+		if err := c.CompilePath(d); err == nil {
+			t.Fatal("invalid flag accepted", d)
+		}
+	}
+}

@@ -24,9 +24,9 @@ func draw(name string, c *IconCursor, attrs []xml.Attr) error {
 	case "rect":
 		return drawRect(c, attrs)
 	case "circle":
-		return drawCircle(c, attrs)
+		return drawCircle(c, attrs, true)
 	case "ellipse":
-		return drawCircle(c, attrs) // circleF handles ellipse also
+		return drawCircle(c, attrs, false)
 	case "polyline":
 		return drawPolyline(c, attrs)
 	case "polygon":
@@ -47,6 +47,11 @@ func drawSvg(c *IconCursor, attrs []xml.Attr) error {
 	var hasViewBox bool
 	var err error
 	for _, attr := range attrs {
+		if attr.Name.Local == "viewBox" {
+			hasViewBox = true
+		}
+	}
+	for _, attr := range attrs {
 		switch attr.Name.Local {
 		case "viewBox":
 			hasViewBox = true
@@ -62,13 +67,13 @@ func drawSvg(c *IconCursor, attrs []xml.Attr) error {
 			if strings.HasSuffix(strings.TrimSpace(attr.Value), "%") {
 				_, err = readFraction(attr.Value)
 			} else {
-				width, err = parseFloat(attr.Value, 64)
+				width, err = intrinsicLength(attr.Value, hasViewBox)
 			}
 		case "height":
 			if strings.HasSuffix(strings.TrimSpace(attr.Value), "%") {
 				_, err = readFraction(attr.Value)
 			} else {
-				height, err = parseFloat(attr.Value, 64)
+				height, err = intrinsicLength(attr.Value, hasViewBox)
 			}
 		}
 		if err != nil {
@@ -88,19 +93,19 @@ func drawRect(c *IconCursor, attrs []xml.Attr) error {
 	for _, attr := range attrs {
 		switch attr.Name.Local {
 		case "x":
-			x, err = parseFloat(attr.Value, 64)
+			x, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "y":
-			y, err = parseFloat(attr.Value, 64)
+			y, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "width":
-			w, err = parseFloat(attr.Value, 64)
+			w, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "height":
-			h, err = parseFloat(attr.Value, 64)
+			h, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "rx":
 			hasRX = true
-			rx, err = parseFloat(attr.Value, 64)
+			rx, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "ry":
 			hasRY = true
-			ry, err = parseFloat(attr.Value, 64)
+			ry, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		}
 		if err != nil {
 			return err
@@ -124,25 +129,45 @@ func drawRect(c *IconCursor, attrs []xml.Attr) error {
 	return nil
 }
 
-func drawCircle(c *IconCursor, attrs []xml.Attr) error {
+func drawCircle(c *IconCursor, attrs []xml.Attr, circle bool) error {
+	var hasRX, hasRY bool
 	var cx, cy, rx, ry float64
 	var err error
 	for _, attr := range attrs {
 		switch attr.Name.Local {
 		case "cx":
-			cx, err = parseFloat(attr.Value, 64)
+			cx, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "cy":
-			cy, err = parseFloat(attr.Value, 64)
+			cy, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "r":
-			rx, err = parseFloat(attr.Value, 64)
+			if !circle {
+				continue
+			}
+			rx, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 			ry = rx
 		case "rx":
-			rx, err = parseFloat(attr.Value, 64)
+			if circle {
+				continue
+			}
+			hasRX = true
+			rx, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "ry":
-			ry, err = parseFloat(attr.Value, 64)
+			if circle {
+				continue
+			}
+			hasRY = true
+			ry, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		}
 		if err != nil {
 			return err
+		}
+	}
+	if !circle {
+		if !hasRX {
+			rx = ry
+		}
+		if !hasRY {
+			ry = rx
 		}
 	}
 	if rx < 0 || ry < 0 {
@@ -161,13 +186,13 @@ func drawLine(c *IconCursor, attrs []xml.Attr) error {
 	for _, attr := range attrs {
 		switch attr.Name.Local {
 		case "x1":
-			x1, err = parseFloat(attr.Value, 64)
+			x1, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "x2":
-			x2, err = parseFloat(attr.Value, 64)
+			x2, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "y1":
-			y1, err = parseFloat(attr.Value, 64)
+			y1, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		case "y2":
-			y2, err = parseFloat(attr.Value, 64)
+			y2, err = c.length(attr.Value, lengthAxis(attr.Name.Local))
 		}
 		if err != nil {
 			return err

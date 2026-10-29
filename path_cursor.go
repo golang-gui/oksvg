@@ -81,11 +81,25 @@ func (c *PathCursor) ReadFloat(numStr string) error {
 var svgNumber = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?`)
 
 func (c *PathCursor) GetPoints(dataPoints string) error {
+	return c.readPoints(dataPoints, false)
+}
+
+func (c *PathCursor) readPoints(dataPoints string, arc bool) error {
 	c.points = c.points[:0]
 	for {
 		dataPoints = strings.TrimLeft(dataPoints, " \t\r\n,")
 		if dataPoints == "" {
 			return nil
+		}
+		if arc && (len(c.points)%7 == 3 || len(c.points)%7 == 4) {
+			// SVG flags are single characters, not numbers. Whitespace between
+			// the flags and the following coordinate is optional.
+			if dataPoints[0] != '0' && dataPoints[0] != '1' {
+				return errParamMismatch
+			}
+			c.points = append(c.points, float64(dataPoints[0]-'0'))
+			dataPoints = dataPoints[1:]
+			continue
 		}
 		token := svgNumber.FindString(dataPoints)
 		if token == "" {
@@ -105,12 +119,17 @@ func (c *PathCursor) GetPoints(dataPoints string) error {
 func (c *PathCursor) EllipseAt(cx, cy, rx, ry float64) {
 	c.placeX, c.placeY = cx+rx, cy
 	c.points = c.points[0:0]
-	c.points = append(c.points, rx, ry, 0.0, 1.0, 0.0, c.placeX, c.placeY)
+	c.points = append(c.points, rx, ry, 0, 0, 1, 0, 0)
 	c.Path.Start(fixed.Point26_6{
 		X: fixed.Int26_6(c.placeX * 64),
 		Y: fixed.Int26_6(c.placeY * 64),
 	})
-	c.placeX, c.placeY = rasterx.AddArc(c.points, cx, cy, c.placeX, c.placeY, &c.Path)
+	// SVG's equivalent path starts at 3 o'clock and proceeds clockwise.
+	// Four quarters also avoid the degenerate start=end case in AddArc.
+	for _, end := range [][2]float64{{cx, cy + ry}, {cx - rx, cy}, {cx, cy - ry}, {cx + rx, cy}} {
+		c.points[5], c.points[6] = end[0], end[1]
+		c.placeX, c.placeY = rasterx.AddArc(c.points, cx, cy, c.placeX, c.placeY, &c.Path)
+	}
 	c.Path.Stop(true)
 }
 
@@ -126,6 +145,10 @@ func (c *PathCursor) AddArcFromA(points []float64) {
 // The resulting path element is stored in the PathCursor.
 func (c *PathCursor) CompilePath(svgPath string) error {
 	c.init()
+	svgPath = strings.TrimSpace(svgPath)
+	if svgPath != "" && svgPath[0] != 'M' && svgPath[0] != 'm' {
+		return errParamMismatch
+	}
 	lastIndex := -1
 	for i, v := range svgPath {
 		if unicode.IsLetter(v) && v != 'e' && v != 'E' {
@@ -207,11 +230,11 @@ func (c *PathCursor) reflectControlCube() {
 // in the cursor's Path
 func (c *PathCursor) addSeg(segString string) error {
 	// Parse the string describing the numeric points in SVG format
-	if err := c.GetPoints(segString[1:]); err != nil {
+	k := segString[0]
+	if err := c.readPoints(segString[1:], k == 'a' || k == 'A'); err != nil {
 		return err
 	}
 	l := len(c.points)
-	k := segString[0]
 	rel := false
 	switch k {
 	case 'z':

@@ -293,8 +293,8 @@ func TestRasterizeGradientSemantics(t *testing.T) {
 		{"affine", `<svg viewBox="0 0 60 60"><defs><linearGradient id="g" gradientTransform="rotate(30 .5 .5)"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><rect x="5" y="5" width="30" height="20" transform="matrix(1 .4 .5 1 5 5)" fill="url(#g)"/></svg>`, 160, 160, []sample{{50, 60, color.RGBA{R: 227, B: 28, A: 255}}, {70, 60, color.RGBA{R: 182, B: 73, A: 255}}, {100, 80, color.RGBA{R: 89, B: 166, A: 255}}}},
 		{"stop alpha", `<svg viewBox="0 0 1 1"><defs><linearGradient id="g"><stop offset="0" stop-color="red" stop-opacity="0"/><stop offset="1" stop-color="blue"/></linearGradient></defs><rect width="1" height="1" fill="url(#g)"/></svg>`, 101, 101, []sample{{50, 50, color.RGBA{R: 64, B: 64, A: 128}}}},
 		{"intrinsic alpha", `<svg viewBox="0 0 1 1"><defs><linearGradient id="g"><stop offset="0" stop-color="#ff000000"/><stop offset="1" stop-color="blue"/></linearGradient></defs><rect width="1" height="1" fill="url(#g)" fill-opacity=".5"/></svg>`, 101, 101, []sample{{50, 50, color.RGBA{R: 32, B: 32, A: 64}}}},
-		{"user percent", `<svg viewBox="10 20 40 20"><defs><linearGradient id="g" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><rect x="10" y="20" width="40" height="20" fill="url(#g)"/></svg>`, 101, 51, []sample{{50, 25, color.RGBA{R: 128, B: 128, A: 255}}}},
-		{"inherited units", `<svg viewBox="10 20 40 20"><defs><linearGradient id="g" href="#base" gradientUnits="userSpaceOnUse"/><linearGradient id="base" x2="100%"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><rect x="10" y="20" width="40" height="20" fill="url(#g)"/></svg>`, 101, 51, []sample{{50, 25, color.RGBA{R: 128, B: 128, A: 255}}}},
+		{"user percent", `<svg viewBox="10 20 40 20"><defs><linearGradient id="g" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><rect x="10" y="20" width="40" height="20" fill="url(#g)"/></svg>`, 101, 51, []sample{{50, 25, color.RGBA{R: 64, B: 191, A: 255}}}},
+		{"inherited units", `<svg viewBox="10 20 40 20"><defs><linearGradient id="g" href="#base" gradientUnits="userSpaceOnUse"/><linearGradient id="base" x2="100%"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><rect x="10" y="20" width="40" height="20" fill="url(#g)"/></svg>`, 101, 51, []sample{{50, 25, color.RGBA{R: 64, B: 191, A: 255}}}},
 		{"stop inherit", `<svg viewBox="0 0 1 1"><defs><linearGradient id="g" color="blue" stop-color="currentColor" stop-opacity=".5"><stop offset="0" stop-color="inherit" stop-opacity="inherit"/><stop offset="1" stop-color="inherit" stop-opacity="inherit"/></linearGradient></defs><rect width="1" height="1" fill="url(#g)"/></svg>`, 101, 101, []sample{{50, 50, color.RGBA{B: 128, A: 128}}}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -468,4 +468,170 @@ func FuzzReadIconStream(f *testing.F) {
 			t.Fatal("partial icon returned on failure")
 		}
 	})
+}
+
+func TestSVGColorNormalization(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  color.NRGBA
+	}{
+		{"hsl(120,200%,25%)", color.NRGBA{G: 128, A: 255}},
+		{"hsl(999,100%,25%)", color.NRGBA{R: 83, B: 128, A: 255}},
+		{"hsl(-120,100%,50%)", color.NRGBA{B: 255, A: 255}},
+		{"hsl(120.0,100%,50%)", color.NRGBA{G: 255, A: 255}},
+		{"hsla(120,100%,50%,.5)", color.NRGBA{G: 255, A: 128}},
+		{"rgb(255 0 0 / 50%)", color.NRGBA{R: 255, A: 128}},
+		{"rgb(255.0,0,0)", color.NRGBA{R: 255, A: 255}},
+	} {
+		got, err := ParseSVGColor(tt.input)
+		if err != nil {
+			t.Fatal(tt.input, err)
+		}
+		if actual := color.NRGBAModel.Convert(got).(color.NRGBA); actual != tt.want {
+			t.Fatalf("%s=%v want %v", tt.input, actual, tt.want)
+		}
+	}
+	for _, src := range []string{"rgb(0,100%,255)", "rgba(0,50%,0,.5)", "hsl(0,50,50%)", "rgb(1,2,3", "hsl(0,,)", "hsla(NaN,0%,0%,1)"} {
+		if _, err := ParseSVGColor(src); err == nil {
+			t.Fatal("invalid color accepted", src)
+		}
+	}
+}
+
+// 采样点避开边缘，预期由 1in=96px 及起始 stop 的 pad 语义确定。
+func TestRasterizeCorpusRegressions(t *testing.T) {
+	for _, tt := range []struct {
+		name, svg  string
+		size, x, y int
+		want       color.RGBA
+	}{
+		{"absolute units", `<svg viewBox="0 0 120 120"><rect x="1in" y="2.54mm" width=".25in" height="10pt" fill="blue"/></svg>`, 120, 100, 15, color.RGBA{B: 255, A: 255}},
+		{"duplicate start pad", `<svg viewBox="0 0 20 20"><defs><linearGradient id="g" x1=".25" x2=".75"><stop offset="0" stop-color="black"/><stop offset="0" stop-color="gray"/><stop offset="1" stop-color="white"/></linearGradient></defs><rect x="2" y="2" width="16" height="16" fill="url(#g)"/></svg>`, 40, 6, 20, color.RGBA{A: 255}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			icon, err := ReadIconStream(strings.NewReader(tt.svg), StrictErrorMode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := icon.Rasterize(tt.size, tt.size).RGBAAt(tt.x, tt.y)
+			if got != tt.want {
+				t.Fatalf("(%d,%d)=%v want %v", tt.x, tt.y, got, tt.want)
+			}
+		})
+	}
+}
+
+// 固定来源的原始 SVG；采样预期来自 Chrome/套件 PNG，并避开抗锯齿边缘。
+func TestOnlineCorpusFixtures(t *testing.T) {
+	for _, tt := range []struct {
+		file string
+		x, y int
+		want color.RGBA
+	}{
+		{"lucide/avocado.svg", 64, 64, color.RGBA{A: 255}},
+		{"lucide/azerbaijani-manat.svg", 64, 32, color.RGBA{A: 255}},
+		{"lucide/book-bookmark.svg", 48, 48, color.RGBA{A: 255}},
+		{"resvg/shapes/rect/mm-values.svg", 64, 64, color.RGBA{G: 128, A: 255}},
+		{"resvg/paint-servers/stop/stops-with-equal-offset-5.svg", 20, 64, color.RGBA{A: 255}},
+		{"resvg/paint-servers/stop/stops-with-equal-offset-6.svg", 20, 64, color.RGBA{A: 255}},
+		{"resvg/painting/fill/hsl-120-200percent-25percent.svg", 64, 64, color.RGBA{G: 128, A: 255}},
+		{"resvg/painting/fill/hsl-999-100percent-25percent.svg", 64, 64, color.RGBA{R: 83, B: 128, A: 255}},
+	} {
+		t.Run(tt.file, func(t *testing.T) {
+			icon, err := ReadIcon("testdata/corpus/"+tt.file, StrictErrorMode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			img := icon.Rasterize(128, 128)
+			if got := img.RGBAAt(tt.x, tt.y); got != tt.want {
+				t.Fatalf("(%d,%d)=%v want=%v", tt.x, tt.y, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSVGCompatibilityExtensions(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+		want       color.RGBA
+	}{
+		{"percentage geometry", `<rect x="25%" y="25%" width="50%" height="50%" fill="blue"/>`, color.RGBA{B: 255, A: 255}},
+		{"missing paint fallback", `<rect width="20" height="20" fill="url(#missing) blue"/>`, color.RGBA{B: 255, A: 255}},
+		{"fallback currentColor", `<rect width="20" height="20" color="blue" fill="url(#missing) currentColor"/>`, color.RGBA{B: 255, A: 255}},
+		{"fallback none", `<rect width="20" height="20" fill="url(#missing) none"/>`, color.RGBA{}},
+		{"external paint fallback", `<rect width="20" height="20" fill="url(https://invalid.example/gradient) blue"/>`, color.RGBA{B: 255, A: 255}},
+		{"class comments", `<style>/* } { */ .blue { /* fill:red; */ fill:blue }</style><rect class="blue" width="20" height="20"/>`, color.RGBA{B: 255, A: 255}},
+		{"inline comments", `<rect width="20" height="20" fill="red" style="/* note */ fill:blue"/>`, color.RGBA{B: 255, A: 255}},
+		{"static link", `<a href="https://invalid.example"><rect width="20" height="20" fill="blue"/></a>`, color.RGBA{B: 255, A: 255}},
+		{"ellipse auto radius", `<ellipse cx="10" cy="10" ry="8" fill="blue"/>`, color.RGBA{B: 255, A: 255}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			icon, err := ReadIconStream(strings.NewReader(`<svg viewBox="0 0 20 20">`+tt.body+`</svg>`), StrictErrorMode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := icon.Rasterize(40, 40).RGBAAt(20, 20); got != tt.want {
+				t.Fatalf("pixel=%v want=%v", got, tt.want)
+			}
+		})
+	}
+	// 非零 viewBox 原点不计入百分比坐标；独立参考 Chrome 的中心应为透明。
+	icon, err := ReadIconStream(strings.NewReader(`<svg viewBox="10 20 40 20"><rect x="0%" y="0%" width="100%" height="100%" fill="red"/></svg>`), StrictErrorMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := icon.Rasterize(101, 51).RGBAAt(50, 25); got.A != 0 {
+		t.Fatalf("percent origin shifted: %v", got)
+	}
+}
+
+func TestUnsupportedCorpusFeatures(t *testing.T) {
+	for _, body := range []string{
+		`<style>rect { fill:red }</style><rect width="20" height="20"/>`,
+		`<rect width="20" height="20" style="mix-blend-mode:multiply"/>`,
+		`<rect width="20" height="20" paint-order="stroke fill"/>`,
+		`<rect width="20" height="20" transform-origin="center"/>`,
+		`<defs><radialGradient id="g" fr=".2"/></defs>`,
+		`<rect width="20" height="20" systemLanguage="ru"/>`,
+	} {
+		if icon, err := ReadIconStream(strings.NewReader(`<svg viewBox="0 0 20 20">`+body+`</svg>`), StrictErrorMode); err == nil || icon != nil {
+			t.Fatalf("unsupported feature accepted: %s", body)
+		}
+	}
+}
+
+func TestRelativeIntrinsicSizeWithViewBox(t *testing.T) {
+	for _, unit := range []string{"em", "rem", "ex"} {
+		src := `<svg width="1` + unit + `" height="1` + unit + `" viewBox="0 0 20 20"><rect width="20" height="20" fill="blue"/></svg>`
+		icon, err := ReadIconStream(strings.NewReader(src), StrictErrorMode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := icon.Rasterize(40, 40).RGBAAt(20, 20); got != (color.RGBA{B: 255, A: 255}) {
+			t.Fatal(got)
+		}
+	}
+	if icon, err := ReadIconStream(strings.NewReader(`<svg width="1em" height="1em"/>`), StrictErrorMode); err == nil || icon != nil {
+		t.Fatal("unresolved font size accepted without viewBox")
+	}
+}
+
+// 圆的等价路径从三点钟位置顺时针前进，10/100 的虚线不能上下镜像。
+func TestCircleDashDirection(t *testing.T) {
+	icon, err := ReadIconStream(strings.NewReader(`<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="20" fill="none" stroke="blue" stroke-width="4" stroke-dasharray="10 100"/></svg>`), StrictErrorMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := icon.Rasterize(160, 160)
+	if a := img.RGBAAt(119, 87).A; a != 255 {
+		t.Fatalf("clockwise first dash alpha=%d", a)
+	}
+	if a := img.RGBAAt(119, 75).A; a != 0 {
+		t.Fatalf("counterclockwise gap alpha=%d", a)
+	}
+	for _, d := range []string{"A5 5 0 0 1 50 50", "L10 10", "Z"} {
+		if icon, err := ReadIconStream(strings.NewReader(`<svg viewBox="0 0 80 80"><path d="`+d+`"/></svg>`), StrictErrorMode); err == nil || icon != nil {
+			t.Fatal("path without moveto accepted", d)
+		}
+	}
 }

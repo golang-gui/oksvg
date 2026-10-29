@@ -82,7 +82,16 @@ func pathPaint(paint any, opacity float64, m rasterx.Matrix2D, b pathBounds) any
 					t = 2 - t
 				}
 			default:
-				t = clampUnit(t)
+				// Pad uses the first/last stop outside the gradient vector. Do not
+				// collapse t<0 to t=0: coincident initial stops may have different
+				// colors before and at the start of the vector.
+				if t < 0 {
+					return multiplyOpacity(stops[0].StopColor, stops[0].Opacity*opacity)
+				}
+				if t > 1 {
+					last := stops[len(stops)-1]
+					return multiplyOpacity(last.StopColor, last.Opacity*opacity)
+				}
 			}
 			i := sort.Search(len(stops), func(i int) bool { return stops[i].Offset > t })
 			if i == 0 {

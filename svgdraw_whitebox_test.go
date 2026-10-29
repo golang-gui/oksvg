@@ -2,7 +2,10 @@
 // created: 2018 by S.R.Wiley
 package oksvg
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestReadFloat(t *testing.T) {
 	c := new(PathCursor)
@@ -61,5 +64,27 @@ func TestGeometricBounds(t *testing.T) {
 		if !b.valid || b.minX != 0 || b.minY != 0 || b.maxX != 100 || b.maxY != tt.maxY {
 			t.Fatalf("%s: bounds=(%g,%g)-(%g,%g)", tt.path, b.minX, b.minY, b.maxX, b.maxY)
 		}
+	}
+}
+
+func TestAbsoluteLengths(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  float64
+	}{
+		{"1in", 96}, {"2.54cm", 96}, {"25.4mm", 96}, {"72pt", 96}, {"6pc", 96}, {"101.6q", 96}, {"4px", 4}, {"-2cm", -96 / 1.27}, {"1e2", 100},
+	} {
+		got, err := parseLength(tt.input)
+		if err != nil || math.Abs(got-tt.want) > 1e-9 {
+			t.Fatalf("%s=%g,%v want=%g", tt.input, got, err, tt.want)
+		}
+	}
+	for _, v := range []string{"1em", "1ex", "NaN", "1e308in", "1 px"} {
+		if _, err := parseLength(v); err == nil {
+			t.Fatal("invalid/unresolved length", v)
+		}
+	}
+	if _, err := parseFloat("1px", 64); err == nil {
+		t.Fatal("unit accepted as a plain number")
 	}
 }

@@ -241,7 +241,7 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 	}
 	switch k {
 	case "color":
-		if v == "currentColor" {
+		if strings.EqualFold(v, "currentColor") {
 			return nil
 		}
 		clr, err := ParseSVGColor(v)
@@ -254,17 +254,36 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 		curStyle.color = clr
 	case "fill", "stroke", "stop-color":
 		var paint any
-		if v == "currentColor" {
+		if strings.EqualFold(v, "currentColor") {
 			paint = currentColorPaint{}
 		} else if strings.HasPrefix(v, "url(") {
-			if !strings.HasSuffix(v, ")") {
+			end := strings.IndexByte(v, ')')
+			if end < 4 {
 				return fmt.Errorf("invalid paint reference %q", v)
 			}
-			href := strings.Trim(strings.TrimSpace(v[4:len(v)-1]), "\"'")
-			if !strings.HasPrefix(href, "#") || len(href) == 1 {
-				return c.unsupported("external paint reference")
+			href := strings.Trim(strings.TrimSpace(v[4:end]), "\"'")
+			ref := paintReference{}
+			if tail := strings.TrimSpace(v[end+1:]); tail != "" {
+				ref.hasFallback = true
+				if strings.EqualFold(tail, "currentColor") {
+					ref.fallback = currentColorPaint{}
+				} else {
+					var err error
+					ref.fallback, err = ParseSVGColor(tail)
+					if err != nil {
+						return err
+					}
+				}
 			}
-			paint = paintReference(href[1:])
+			if !strings.HasPrefix(href, "#") || len(href) == 1 {
+				if !ref.hasFallback {
+					return c.unsupported("external paint reference")
+				}
+				paint = ref.fallback
+			} else {
+				ref.id = href[1:]
+				paint = ref
+			}
 		} else {
 			var err error
 			paint, err = ParseSVGColor(v)
@@ -303,6 +322,22 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 		}
 	case "color-interpolation":
 		if v != "sRGB" && v != "auto" {
+			return c.unsupported(k + " " + v)
+		}
+	case "mix-blend-mode":
+		if v != "normal" {
+			return c.unsupported(k + " " + v)
+		}
+	case "paint-order":
+		if v != "normal" && v != "fill stroke markers" {
+			return c.unsupported(k + " " + v)
+		}
+	case "systemLanguage", "requiredFeatures", "requiredExtensions":
+		if v != "" {
+			return c.unsupported(k)
+		}
+	case "transform-origin":
+		if v != "0 0" && v != "0px 0px" {
 			return c.unsupported(k + " " + v)
 		}
 	case "stroke-linegap":
@@ -367,7 +402,7 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 		}
 		curStyle.MiterLimit = mLimit
 	case "stroke-width":
-		width, err := parseFloat(v, 64)
+		width, err := c.length(v, 2)
 		if err != nil {
 			return err
 		}
@@ -376,7 +411,7 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 		}
 		curStyle.LineWidth = width
 	case "stroke-dashoffset":
-		dashOffset, err := parseFloat(v, 64)
+		dashOffset, err := c.length(v, 2)
 		if err != nil {
 			return err
 		}
@@ -387,7 +422,7 @@ func (c *IconCursor) readStyleAttr(curStyle *PathStyle, k, v string) error {
 			dashes := splitOnCommaOrSpace(v)
 			dList := make([]float64, len(dashes))
 			for i, dstr := range dashes {
-				d, err := parseFloat(strings.TrimSpace(dstr), 64)
+				d, err := c.length(dstr, 2)
 				if err != nil {
 					return err
 				}

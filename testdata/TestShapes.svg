@@ -15,7 +15,7 @@
   <ellipse cx="150" cy="220" rx="30" ry="20"
         fill="Lemonchiffon" />
   <polygon points="220,220,280,220, 280,270, 220,270, 250, 245 "
-        fill="rgb(0,100%,255)"/>
+        fill="rgb(0,255,255)"/>
 
     <polyline points="220,320,280,320, 280,370, 220,370, 250, 345 "
         fill="none" stroke="springgreen" stroke-width="8"/>

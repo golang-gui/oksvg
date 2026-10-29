@@ -175,7 +175,7 @@ func (c *svgCompiler) collect(e *svgElement) error {
 		if e.parent != nil {
 			return c.cursor.unsupported("nested svg")
 		}
-	case "g", "defs", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use", "linearGradient", "radialGradient", "stop", "style", "title", "desc":
+	case "g", "a", "defs", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use", "linearGradient", "radialGradient", "stop", "style", "title", "desc":
 	default:
 		// Unsupported containers are opaque: their IDs and styles must not leak.
 		return c.cursor.unsupported("element " + e.name)
@@ -193,9 +193,33 @@ func (c *svgCompiler) collect(e *svgElement) error {
 		}
 	}
 	if e.name == "style" {
-		for _, block := range strings.Split(e.text, "}") {
+		if mime := e.attr("type"); mime != "" && !strings.EqualFold(mime, "text/css") {
+			return nil
+		}
+		text, err := stripCSSComments(e.text)
+		if err != nil {
+			return err
+		}
+		for _, block := range strings.Split(text, "}") {
 			if strings.TrimSpace(block) == "" {
 				continue
+			}
+			if open := strings.IndexByte(block, '{'); open >= 0 {
+				var selectors []string
+				for _, selector := range strings.Split(block[:open], ",") {
+					selector = strings.TrimSpace(selector)
+					if !simpleClassSelector(selector) {
+						if err := c.cursor.unsupported("CSS selector " + selector); err != nil {
+							return err
+						}
+						continue
+					}
+					selectors = append(selectors, selector)
+				}
+				if len(selectors) == 0 {
+					continue
+				}
+				block = strings.Join(selectors, ",") + block[open:]
 			}
 			classes, err := parseClasses(block + "}")
 			if err != nil {
@@ -277,6 +301,17 @@ func (c *svgCompiler) gradient(id string, depth int) error {
 			}
 		}
 	}
+	if value, ok := attrs["fr"]; ok {
+		n, err := gradientLength(value, 4, g.Units, c.cursor.icon.ViewBox)
+		if err != nil {
+			return err
+		}
+		if n != 0 {
+			if err := c.cursor.unsupported("radialGradient.fr"); err != nil {
+				return err
+			}
+		}
+	}
 	names := []string{"x1", "y1", "x2", "y2"}
 	defaults := []string{"0%", "0%", "100%", "0%"}
 	if g.IsRadial {
@@ -350,22 +385,15 @@ func (c *svgCompiler) gradient(id string, depth int) error {
 }
 
 func gradientLength(value string, axis int, units rasterx.GradientUnits, viewport struct{ X, Y, W, H float64 }) (float64, error) {
-	value = strings.TrimSpace(value)
-	if !strings.HasSuffix(value, "%") {
-		return parseFloat(value, 64)
+	if units == rasterx.ObjectBoundingBox {
+		return readFraction(value)
 	}
-	n, err := readFraction(value)
-	if err != nil || units == rasterx.ObjectBoundingBox {
-		return n, err
+	if axis < 4 {
+		axis %= 2
+	} else {
+		axis = 2
 	}
-	switch axis {
-	case 0, 2:
-		return viewport.X + n*viewport.W, nil
-	case 1, 3:
-		return viewport.Y + n*viewport.H, nil
-	default:
-		return n * math.Hypot(viewport.W, viewport.H) / math.Sqrt2, nil
-	}
+	return viewportLength(value, axis, viewport.W, viewport.H)
 }
 
 func (c *svgCompiler) compile(e *svgElement, depth int) error {
@@ -390,7 +418,7 @@ func (c *svgCompiler) compile(e *svgElement, depth int) error {
 	c.active[e] = true
 	defer delete(c.active, e)
 	switch e.name {
-	case "svg", "g":
+	case "svg", "g", "a":
 		for _, child := range e.children {
 			if err := c.compile(child, depth+1); err != nil {
 				return err
@@ -412,13 +440,13 @@ func (c *svgCompiler) compile(e *svgElement, depth int) error {
 		x, y := 0.0, 0.0
 		var err error
 		if v := e.attr("x"); v != "" {
-			x, err = parseFloat(v, 64)
+			x, err = c.cursor.length(v, 0)
 			if err != nil {
 				return err
 			}
 		}
 		if v := e.attr("y"); v != "" {
-			y, err = parseFloat(v, 64)
+			y, err = c.cursor.length(v, 1)
 			if err != nil {
 				return err
 			}
@@ -459,9 +487,12 @@ func (c *svgCompiler) resolvePaint(value any, currentColor any) (any, error) {
 	case currentColorPaint:
 		return currentColor, nil
 	case paintReference:
-		g := c.cursor.icon.Grads[string(v)]
+		g := c.cursor.icon.Grads[v.id]
 		if g == nil {
-			return nil, fmt.Errorf("missing paint server %q", v)
+			if v.hasFallback {
+				return c.resolvePaint(v.fallback, currentColor)
+			}
+			return nil, fmt.Errorf("missing paint server %q", v.id)
 		}
 		return *g, nil
 	default:

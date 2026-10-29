@@ -42,4 +42,8 @@ var DefaultStyle = PathStyle{
 }
 
 type currentColorPaint struct{}
-type paintReference string
+type paintReference struct {
+	id          string
+	fallback    any
+	hasFallback bool
+}

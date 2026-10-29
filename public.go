@@ -98,156 +98,180 @@ func ParseSVGColorNum(colorStr string) (r, g, b uint8, err error) {
 // ParseSVGColor parses an SVG color string in all forms
 // including all SVG1.1 names, obtained from the image.colornames package
 func ParseSVGColor(colorStr string) (color.Color, error) {
-	// _, _, _, a := curColor.RGBA()
-	colorStr = strings.TrimSpace(colorStr)
-	v := strings.ToLower(colorStr)
+	v := strings.ToLower(strings.TrimSpace(colorStr))
+	switch v {
+	case "none", "":
+		return nil, nil
+	case "transparent":
+		return color.NRGBA{}, nil
+	}
 	if strings.HasPrefix(v, "url(") {
 		return nil, fmt.Errorf("paint references require a document")
 	}
-	if v == "transparent" {
-		return color.NRGBA{}, nil
-	}
-	if strings.HasPrefix(v, "#") && (len(v) == 5 || len(v) == 9) {
-		hex := v[1:]
-		if len(hex) == 4 {
-			var expanded strings.Builder
-			for _, r := range hex {
-				expanded.WriteRune(r)
-				expanded.WriteRune(r)
+	if strings.HasPrefix(v, "#") {
+		if len(v) == 5 || len(v) == 9 {
+			hex := v[1:]
+			if len(hex) == 4 {
+				var b strings.Builder
+				for _, r := range hex {
+					b.WriteRune(r)
+					b.WriteRune(r)
+				}
+				hex = b.String()
 			}
-			hex = expanded.String()
-		}
-		rgba, err := strconv.ParseUint(hex, 16, 32)
-		if err != nil {
-			return nil, err
-		}
-		return color.NRGBA{R: uint8(rgba >> 24), G: uint8(rgba >> 16), B: uint8(rgba >> 8), A: uint8(rgba)}, nil
-	}
-	if strings.HasPrefix(v, "rgba(") && strings.HasSuffix(v, ")") {
-		args := strings.Split(v[5:len(v)-1], ",")
-		if len(args) != 4 {
-			return nil, errParamMismatch
-		}
-		r, err := parseColorValue(strings.TrimSpace(args[0]))
-		if err != nil {
-			return nil, err
-		}
-		g, err := parseColorValue(strings.TrimSpace(args[1]))
-		if err != nil {
-			return nil, err
-		}
-		b, err := parseColorValue(strings.TrimSpace(args[2]))
-		if err != nil {
-			return nil, err
-		}
-		a, err := readFraction(args[3])
-		if err != nil {
-			return nil, err
-		}
-		return color.NRGBA{R: r, G: g, B: b, A: uint8(math.Round(clampUnit(a) * 255))}, nil
-	}
-	switch v {
-	case "none", "":
-		// nil signals that the function (fill or stroke) is off;
-		// not the same as black
-		return nil, nil
-	default:
-		cn, ok := colornames.Map[v]
-		if ok {
-			r, g, b, a := cn.RGBA()
-			return color.NRGBA{uint8(r), uint8(g), uint8(b), uint8(a)}, nil
-		}
-	}
-	cStr := strings.TrimPrefix(v, "rgb(")
-	if cStr != v {
-		cStr := strings.TrimSuffix(cStr, ")")
-		vals := strings.Split(cStr, ",")
-		if len(vals) != 3 {
-			return color.NRGBA{}, errParamMismatch
-		}
-		var cvals [3]uint8
-		var err error
-		for i := range cvals {
-			cvals[i], err = parseColorValue(vals[i])
+			n, err := strconv.ParseUint(hex, 16, 32)
 			if err != nil {
 				return nil, err
 			}
+			return color.NRGBA{R: uint8(n >> 24), G: uint8(n >> 16), B: uint8(n >> 8), A: uint8(n)}, nil
 		}
-		return color.NRGBA{cvals[0], cvals[1], cvals[2], 0xFF}, nil
-	}
-
-	cStr = strings.TrimPrefix(v, "hsl(")
-	if cStr != v {
-		cStr := strings.TrimSuffix(cStr, ")")
-		vals := strings.Split(cStr, ",")
-		if len(vals) != 3 {
-			return color.NRGBA{}, errParamMismatch
-		}
-
-		H, err := strconv.ParseInt(strings.TrimSpace(vals[0]), 10, 64)
-		if err != nil {
-			return color.NRGBA{}, fmt.Errorf("invalid hue in hsl: '%s' (%s)", vals[0], err)
-		}
-
-		if !strings.HasSuffix(strings.TrimSpace(vals[1]), "%") || !strings.HasSuffix(strings.TrimSpace(vals[2]), "%") {
-			return nil, errParamMismatch
-		}
-		S, err := parseFloat(strings.TrimSuffix(strings.TrimSpace(vals[1]), "%"), 64)
-		if err != nil {
-			return color.NRGBA{}, fmt.Errorf("invalid saturation in hsl: '%s' (%s)", vals[1], err)
-		}
-		S = S / 100
-
-		L, err := parseFloat(strings.TrimSuffix(strings.TrimSpace(vals[2]), "%"), 64)
-		if err != nil {
-			return color.NRGBA{}, fmt.Errorf("invalid lightness in hsl: '%s' (%s)", vals[2], err)
-		}
-		L = L / 100
-
-		C := (1 - math.Abs((2*L)-1)) * S
-		X := C * (1 - math.Abs(math.Mod((float64(H)/60), 2)-1))
-		m := L - C/2
-
-		var rp, gp, bp float64
-		if H < 60 {
-			rp, gp, bp = float64(C), float64(X), float64(0)
-		} else if H < 120 {
-			rp, gp, bp = float64(X), float64(C), float64(0)
-		} else if H < 180 {
-			rp, gp, bp = float64(0), float64(C), float64(X)
-		} else if H < 240 {
-			rp, gp, bp = float64(0), float64(X), float64(C)
-		} else if H < 300 {
-			rp, gp, bp = float64(X), float64(0), float64(C)
-		} else {
-			rp, gp, bp = float64(C), float64(0), float64(X)
-		}
-
-		r, g, b := math.Round((rp+m)*255), math.Round((gp+m)*255), math.Round((bp+m)*255)
-		if r > 255 {
-			r = 255
-		}
-		if g > 255 {
-			g = 255
-		}
-		if b > 255 {
-			b = 255
-		}
-
-		return color.NRGBA{
-			uint8(r),
-			uint8(g),
-			uint8(b),
-			0xFF,
-		}, nil
-	}
-
-	if colorStr[0] == '#' {
-		r, g, b, err := ParseSVGColorNum(colorStr)
+		r, g, b, err := ParseSVGColorNum(v)
 		if err != nil {
 			return nil, err
 		}
-		return color.NRGBA{r, g, b, 0xFF}, nil
+		return color.NRGBA{R: r, G: g, B: b, A: 255}, nil
 	}
-	return nil, errParamMismatch
+	if c, ok := colornames.Map[v]; ok {
+		return color.NRGBA(c), nil
+	}
+	open := strings.IndexByte(v, '(')
+	if open < 0 || !strings.HasSuffix(v, ")") {
+		return nil, errParamMismatch
+	}
+	name := v[:open]
+	if name != "rgb" && name != "rgba" && name != "hsl" && name != "hsla" {
+		return nil, errParamMismatch
+	}
+	body := v[open+1 : len(v)-1]
+	args, comma, err := colorArguments(body)
+	if err != nil {
+		return nil, err
+	}
+	alpha := 1.0
+	if len(args) == 4 {
+		alpha, err = readFraction(args[3])
+		if err != nil {
+			return nil, err
+		}
+	}
+	result := color.NRGBA{A: uint8(math.Round(clampUnit(alpha) * 255))}
+	if name == "rgb" || name == "rgba" {
+		percent := strings.HasSuffix(args[0], "%")
+		for _, v := range args[:3] {
+			if comma && strings.HasSuffix(v, "%") != percent {
+				return nil, fmt.Errorf("mixed RGB number/percentage channels")
+			}
+		}
+		result.R, err = parseColorValue(args[0])
+		if err != nil {
+			return nil, err
+		}
+		result.G, err = parseColorValue(args[1])
+		if err != nil {
+			return nil, err
+		}
+		result.B, err = parseColorValue(args[2])
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+	hue, err := parseHue(args[0])
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(args[1], "%") || !strings.HasSuffix(args[2], "%") {
+		return nil, errParamMismatch
+	}
+	saturation, err := readFraction(args[1])
+	if err != nil {
+		return nil, err
+	}
+	lightness, err := readFraction(args[2])
+	if err != nil {
+		return nil, err
+	}
+	saturation, lightness = clampUnit(saturation), clampUnit(lightness)
+	chroma := (1 - math.Abs(2*lightness-1)) * saturation
+	x := chroma * (1 - math.Abs(math.Mod(hue/60, 2)-1))
+	m := lightness - chroma/2
+	var r, g, b float64
+	switch {
+	case hue < 60:
+		r, g = chroma, x
+	case hue < 120:
+		r, g = x, chroma
+	case hue < 180:
+		g, b = chroma, x
+	case hue < 240:
+		g, b = x, chroma
+	case hue < 300:
+		r, b = x, chroma
+	default:
+		r, b = chroma, x
+	}
+	result.R = uint8(math.Round(clampUnit(r+m) * 255))
+	result.G = uint8(math.Round(clampUnit(g+m) * 255))
+	result.B = uint8(math.Round(clampUnit(b+m) * 255))
+	return result, nil
+}
+
+func colorArguments(body string) ([]string, bool, error) {
+	comma := strings.Contains(body, ",")
+	var args []string
+	if comma {
+		if strings.Contains(body, "/") {
+			return nil, comma, errParamMismatch
+		}
+		args = strings.Split(body, ",")
+	} else {
+		parts := strings.Split(body, "/")
+		if len(parts) > 2 {
+			return nil, comma, errParamMismatch
+		}
+		args = strings.Fields(parts[0])
+		if len(args) != 3 {
+			return nil, comma, errParamMismatch
+		}
+		if len(parts) == 2 {
+			args = append(args, parts[1])
+		}
+	}
+	if len(args) != 3 && len(args) != 4 {
+		return nil, comma, errParamMismatch
+	}
+	for i := range args {
+		args[i] = strings.TrimSpace(args[i])
+		if args[i] == "" {
+			return nil, comma, errParamMismatch
+		}
+	}
+	return args, comma, nil
+}
+
+func parseHue(value string) (float64, error) {
+	factor := 1.0
+	for _, unit := range []struct {
+		name   string
+		factor float64
+	}{{"grad", .9}, {"turn", 360}, {"deg", 1}, {"rad", 180 / math.Pi}} {
+		if strings.HasSuffix(value, unit.name) {
+			value = strings.TrimSuffix(value, unit.name)
+			factor = unit.factor
+			break
+		}
+	}
+	n, err := parseFloat(value, 64)
+	if err != nil {
+		return 0, err
+	}
+	n *= factor
+	if !isFinite(n) {
+		return 0, errParamMismatch
+	}
+	n = math.Mod(n, 360)
+	if n < 0 {
+		n += 360
+	}
+	return n, nil
 }
