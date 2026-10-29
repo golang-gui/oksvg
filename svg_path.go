@@ -7,6 +7,7 @@ package oksvg
 
 import (
 	"image/color"
+	"math"
 
 	"github.com/srwiley/rasterx"
 	"golang.org/x/image/math/fixed"
@@ -23,69 +24,61 @@ func (svgp *SvgPath) Draw(r *rasterx.Dasher, opacity float64) {
 	svgp.DrawTransformed(r, opacity, rasterx.Identity)
 }
 
-// DrawTransformed draws the compiled SvgPath into the Dasher while applying transform t.
+// DrawTransformed draws the compiled SvgPath into the Dasher while applying
+// transform t. The path/style remain unchanged; the Dasher is call-local state.
 func (svgp *SvgPath) DrawTransformed(r *rasterx.Dasher, opacity float64, t rasterx.Matrix2D) {
-	m := svgp.mAdder.M
-	svgp.mAdder.M = t.Mult(m)
-	defer func() { svgp.mAdder.M = m }() // Restore untransformed matrix
+	m := t.Mult(svgp.mAdder.M)
+	if m.A*m.D-m.B*m.C == 0 {
+		return
+	}
+	bounds := boundsOf(svgp.Path)
 	if svgp.fillerColor != nil {
 		r.Clear()
-		rf := &r.Filler
-		rf.SetWinding(svgp.UseNonZeroWinding)
-		svgp.mAdder.Adder = rf // This allows transformations to be applied
-		svgp.Path.AddTo(&svgp.mAdder)
-
-		switch fillerColor := svgp.fillerColor.(type) {
-		case color.Color:
-			rf.SetColor(rasterx.ApplyOpacity(fillerColor, svgp.FillOpacity*opacity))
-		case rasterx.Gradient:
-			if fillerColor.Units == rasterx.ObjectBoundingBox {
-				fRect := rf.Scanner.GetPathExtent()
-				mnx, mny := float64(fRect.Min.X)/64, float64(fRect.Min.Y)/64
-				mxx, mxy := float64(fRect.Max.X)/64, float64(fRect.Max.Y)/64
-				fillerColor.Bounds.X, fillerColor.Bounds.Y = mnx, mny
-				fillerColor.Bounds.W, fillerColor.Bounds.H = mxx-mnx, mxy-mny
-			}
-			rf.SetColor(fillerColor.GetColorFunction(svgp.FillOpacity * opacity))
-		}
-		rf.Draw()
-		// default is true
-		rf.SetWinding(true)
-	}
-	if svgp.linerColor != nil {
-		r.Clear()
-		svgp.mAdder.Adder = r
-		lineGap := svgp.LineGap
-		if lineGap == nil {
-			lineGap = DefaultStyle.LineGap
-		}
-		lineCap := svgp.LineCap
-		if lineCap == nil {
-			lineCap = DefaultStyle.LineCap
-		}
-		leadLineCap := lineCap
-		if svgp.LeadLineCap != nil {
-			leadLineCap = svgp.LeadLineCap
-		}
-		r.SetStroke(fixed.Int26_6(svgp.LineWidth*64),
-			fixed.Int26_6(svgp.MiterLimit*64), leadLineCap, lineCap,
-			lineGap, svgp.LineJoin, svgp.Dash, svgp.DashOffset)
-		svgp.Path.AddTo(&svgp.mAdder)
-		switch linerColor := svgp.linerColor.(type) {
-		case color.Color:
-			r.SetColor(rasterx.ApplyOpacity(linerColor, svgp.LineOpacity*opacity))
-		case rasterx.Gradient:
-			if linerColor.Units == rasterx.ObjectBoundingBox {
-				fRect := r.Scanner.GetPathExtent()
-				mnx, mny := float64(fRect.Min.X)/64, float64(fRect.Min.Y)/64
-				mxx, mxy := float64(fRect.Max.X)/64, float64(fRect.Max.Y)/64
-				linerColor.Bounds.X, linerColor.Bounds.Y = mnx, mny
-				linerColor.Bounds.W, linerColor.Bounds.H = mxx-mnx, mxy-mny
-			}
-			r.SetColor(linerColor.GetColorFunction(svgp.LineOpacity * opacity))
-		}
+		r.SetWinding(svgp.UseNonZeroWinding)
+		svgp.Path.AddTo(&rasterx.MatrixAdder{Adder: &r.Filler, M: m})
+		r.SetColor(pathPaint(svgp.fillerColor, svgp.FillOpacity*opacity, m, bounds))
 		r.Draw()
+		r.SetWinding(true)
 	}
+	if svgp.linerColor == nil || svgp.LineWidth <= 0 {
+		return
+	}
+	// Stroke in local coordinates, then transform the emitted outline. This
+	// preserves widths, joins, caps and dash metrics under shear/nonuniform scale.
+	// Upscale local work where necessary to retain fixed-point device precision.
+	scale := math.Max(1, math.Hypot(math.Hypot(m.A, m.B), math.Hypot(m.C, m.D)))
+	outline := &outlineScanner{Scanner: r.Scanner, matrix: m.Scale(1/scale, 1/scale)}
+	local := rasterx.NewDasher(0, 0, outline)
+	cap := svgp.LineCap
+	if cap == nil {
+		cap = rasterx.ButtCap
+	}
+	lead := svgp.LeadLineCap
+	if lead == nil {
+		lead = cap
+	}
+	dash := make([]float64, len(svgp.Dash))
+	for i, d := range svgp.Dash {
+		dash[i] = d * scale
+	}
+	if len(dash)%2 != 0 {
+		dash = append(dash, dash...)
+	}
+	offset := svgp.DashOffset * scale
+	total := 0.0
+	for _, d := range dash {
+		total += d
+	}
+	if total > 0 {
+		offset = math.Mod(offset, total)
+		if offset < 0 {
+			offset += total
+		}
+	}
+	local.SetStroke(fixed.Int26_6(svgp.LineWidth*scale*64), fixed.Int26_6(svgp.MiterLimit*64), lead, cap, svgp.LineGap, svgp.LineJoin, dash, offset)
+	local.SetColor(pathPaint(svgp.linerColor, svgp.LineOpacity*opacity, m, bounds))
+	svgp.Path.AddTo(&rasterx.MatrixAdder{Adder: local, M: rasterx.Identity.Scale(scale, scale)})
+	local.Draw()
 }
 
 // GetFillColor returns the fill color of the SvgPath if one is defined and otherwise returns colornames.Black
@@ -107,3 +100,14 @@ func (svgp *SvgPath) SetFillColor(clr color.Color) {
 func (svgp *SvgPath) SetLineColor(clr color.Color) {
 	svgp.linerColor = clr
 }
+
+// outlineScanner keeps the caller's raster bounds and paint coordinates while
+// receiving local-space stroke outline segments from rasterx.
+type outlineScanner struct {
+	rasterx.Scanner
+	matrix rasterx.Matrix2D
+}
+
+func (s *outlineScanner) Start(p fixed.Point26_6) { s.Scanner.Start(s.matrix.TFixed(p)) }
+func (s *outlineScanner) Line(p fixed.Point26_6)  { s.Scanner.Line(s.matrix.TFixed(p)) }
+func (s *outlineScanner) SetBounds(int, int)      {}
