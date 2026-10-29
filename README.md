@@ -99,8 +99,8 @@ Oksvg uses the maintained [rasterx](https://github.com/golang-gui/rasterx) fork 
 path stroking, including the extended 'arc' join mode.
 
 The current development branches use the `golang-gui` module paths throughout.
-Dependencies are pinned to exact fork commits. Those commits must be available
-on their remotes before standalone module resolution; local integration before
+Renderer dependencies are pinned to their `v0.1.0` release tags. These tags must
+be available on their remotes before standalone module resolution; local integration before
 pushing uses a temporary Go workspace. See the validation notes for the staging
 and release order. Legacy `Draw` users must use the matching fork's rasterx types.
 

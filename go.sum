@@ -1,3 +1,7 @@
+github.com/golang-gui/rasterx v0.1.0 h1:DuZ9K72Z0DwmZ5URKN7BtJrGf3Zfb6dOVYlkRgsBMZU=
+github.com/golang-gui/rasterx v0.1.0/go.mod h1:0DNY14Qos9w2TA+xkhh4zb9bo1CTqDYtjkXflhpyLS4=
+github.com/golang-gui/scanFT v0.1.0 h1:z+v1wk9LTk2az8/kswxkeDlvXvkWFHzVOHBt7103zYs=
+github.com/golang-gui/scanFT v0.1.0/go.mod h1:W6qtBqYU226lHgshUCeQ2b99lJEGZE3f3PQYy3FJEZM=
 github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef h1:Ch6Q+AZUxDBCVqdkI8FSpFyZDtCVBc2VmejdNrm5rRQ=
 github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef/go.mod h1:nXTWP6+gD5+LUJ8krVhhoeHjvHTutPxMYl5SvkcnJNE=
 github.com/srwiley/scanFT v0.0.0-20220128184157-0d1ee492111f h1:uLR2GaV0kWYZ3Ns3l3sjtiN+mOWAQadvrL8HXcyKjl0=

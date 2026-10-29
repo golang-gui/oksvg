@@ -177,16 +177,16 @@ Strict 模式拒绝文本、字体、外部图片、filter、mask、clipPath、p
 
 ## 依赖与后续工作
 
-三个 main 使用 golang-gui 模块路径，已将开发占位替换为实际提交的精确伪版本。
+三个 main 使用 golang-gui 模块路径，首次发行依赖固定为各 fork 的 `v0.1.0` 标签。
 依赖提交尚未推送时，通过仓库外临时 go.work 与本地源码联调；没有将 replace 写入各库
-的 go.mod。独立消费前需先推送被引用的提交，正式标签发布另按用户指令执行。
+的 go.mod。独立消费前需先推送被引用的标签，确保正式模块能从远端独立解析。
 
 - [x] 本阶段的描边、子路径、颜色缺陷修正，以及 SVG 2 几何样式适配及对照。
 - [x] 全量测试与目标编译。
 - [x] race、解析 fuzz、最终代码快照与格式检查。
 - [x] 将模块迁移、各项修复分别提交，并固定 fork 依赖提交版本。
 - [ ] 从 master 创建对应上游 PR 分支，保留上游路径重新验证。
-- [ ] 按 rasterx -> scanFT -> oksvg 的顺序推送提交；正式标签另行发布。
+- [x] 首版发行依赖固定为 `v0.1.0`；发布顺序为 rasterx -> scanFT -> oksvg。
 - [x] 第三/四阶段复核虚线、miter-clip 和 line-as-curve-2，分别修复或确认参考不适用。
 - [ ] 其他非共线退化曲线、复杂 CSS 几何表达式等能力另行设计。
 - [ ] GOUI 接入，等待用户单独指令。
@@ -265,7 +265,7 @@ MAE 为预乘 RGBA 四通道平均绝对差，数值范围 0～255；不将其�
 - [x] 三库 `CGO_ENABLED=0 go test -c`，Windows amd64 / Linux arm64 / macOS arm64，共九项通过。
 - [x] 原始输入、独立几何/合成回归、跨库对照及代码快照校验。
 - [x] 本轮修复、依赖版本与验证文档分别提交，fork 依赖固定到实际提交的精确版本。
-- [ ] 从 master 准备上游 PR 分支；推送、标签和 GOUI 升级另按用户指令执行。
+- [ ] 从 master 准备上游 PR 分支；GOUI 升级另按用户指令执行。
 
 全部执行于 Linux amd64、Go 1.25.8 的仓库外源码副本；跨目标仅编译，不代表原生运行验收。
 临时产物：`/tmp/svg-edges-bmcfhzre/logs/full-comparison.jsonl`、`full-summary.json`、
@@ -330,10 +330,18 @@ Chrome 500px 重新运行后仍显示上述差异，CSS.supports 仍返回 false
 产物位于仓库外 `/tmp/svg-semantics-bca5nn9d/`，包括基线失败回归、全量逐项对照、
 selected-comparison.json、race/fuzz 日志、目标编译结果及源代码快照。
 依赖使用外部 go.work 联调；本阶段修复与依赖更新已分别提交，依赖固定到实际提交的精确版本。
-尚未推送或发布标签，GOUI 未修改。
+以上为第四阶段开发验证记录；首次发行接入见下段。GOUI 未修改。
 
 仍未覆盖：非零 fr、焦点恰在终圆上时 repeat/reflect 退化区域的平均色等完整边界语义；
 它们不能因本阶段外部焦点修正而自动宣称支持。普通图标的 26.6 精度及边缘差异也仍保留。
+
+## v0.1.0 发行接入
+
+首版三库均从 main 发布 `v0.1.0`，scanFT 与 oksvg 依赖对应的正式标签，
+不将本地 replace 或临时 go.work 作为发行依赖。各发行源码在仓库外副本执行
+`GOWORK=off go test -mod=readonly ./... -count=1`，核对远端模块及校验和可独立解析。
+Go 代理在首次推送后曾返回旧提交不存在的缓存结果；本次命令改用官方代理完成验证，
+没有修改全局 Go 配置或禁用校验和检查。上游 PR 与 GOUI 接入仍为独立后续工作。
 
 ## 规范依据
 
